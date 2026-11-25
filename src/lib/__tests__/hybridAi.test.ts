@@ -174,6 +174,43 @@ describe('Hybrid AI routing & model configuration', () => {
     expect(result.data.cards[0].id).toBe('c1');
   });
 
+  it('retries transient cloud 500 high-demand errors automatically before succeeding', async () => {
+    const generateContent = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          '[500 ] This model is currently experiencing high demand. Spikes in demand are usually temporary.',
+        ),
+      )
+      .mockResolvedValueOnce(
+        createMockResult(
+          {
+            cards: [
+              {
+                id: 'c1',
+                front: 'Why use hybrid AI?',
+                back: 'Local Nano avoids cloud demand spikes.',
+                timestamp: '00:15',
+                startSeconds: 15,
+              },
+            ],
+          },
+          InferenceSource.IN_CLOUD,
+        ),
+      );
+
+    const sleepSpy = vi.fn().mockResolvedValue(undefined);
+    const result = await generateFlashcards('[00:15] Hybrid resilience', 'hybrid', {
+      ai: MOCK_AI,
+      sleep: sleepSpy,
+      modelFactory: () => ({ generateContent }),
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(sleepSpy).toHaveBeenCalledWith(800);
+    expect(result.data.cards).toHaveLength(1);
+  });
+
   it('enforces Strict Local-Only policy and surfaces actionable Nano recovery hint on failure', async () => {
     await expect(
       extractStudyNotes('[00:00] Local-only test', 'local-only', {

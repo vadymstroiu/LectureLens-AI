@@ -74,6 +74,7 @@ export interface HybridInferenceDeps {
   modelFactory?: (ai: AI, params: HybridParams) => Pick<GenerativeModel, 'generateContent'>;
   now?: () => number;
   onDownloadProgress?: (percent: number) => void;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface ChromeLanguageModelGlobal {
@@ -486,6 +487,13 @@ function buildOnDeviceRecoveryError(rawError: unknown): HybridAiError {
   );
 }
 
+export function isTransientCloudError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\[(429|500|502|503|504)\s*\]|high demand|overloaded|temporarily unavailable|resource exhausted/i.test(
+    message,
+  );
+}
+
 async function runHybridTask<T>(
   task: StudyTaskKind,
   params: HybridParams,
@@ -506,22 +514,46 @@ async function runHybridTask<T>(
     ((instance: AI, modelParams: HybridParams) =>
       getGenerativeModel(instance, modelParams));
   const now = deps?.now ?? (() => performance.now());
+  const sleep =
+    deps?.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   const model = factory(ai, params);
   const startMs = now();
 
-  let result: GenerateContentResult;
-  try {
-    result = await model.generateContent(prompt);
-  } catch (error) {
-    if (params.mode === InferenceMode.ONLY_ON_DEVICE) {
-      throw buildOnDeviceRecoveryError(error);
+  const maxRetries = params.mode === InferenceMode.ONLY_ON_DEVICE ? 0 : 2;
+  let result: GenerateContentResult | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      result = await model.generateContent(prompt);
+      break;
+    } catch (error) {
+      if (params.mode === InferenceMode.ONLY_ON_DEVICE) {
+        throw buildOnDeviceRecoveryError(error);
+      }
+
+      const transient = isTransientCloudError(error);
+      if (transient && attempt < maxRetries) {
+        await sleep(800 * (attempt + 1));
+        continue;
+      }
+
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new HybridAiError(
+        'INFERENCE_FAILED',
+        `AI generation failed during ${task}: ${detail}`,
+        transient
+          ? 'The cloud Gemini model is temporarily busy due to high demand. Wait a few seconds and retry — once Gemini Nano finishes downloading, Notes and Flashcards run 100% on-device with zero cloud spikes.'
+          : 'Check your network connection, Firebase AI Logic API enablement, and App Check debug token.',
+      );
     }
-    const detail = error instanceof Error ? error.message : String(error);
+  }
+
+  if (!result) {
     throw new HybridAiError(
       'INFERENCE_FAILED',
-      `AI generation failed during ${task}: ${detail}`,
-      'Check your network connection, Firebase AI Logic API enablement, and App Check debug token.',
+      `AI generation failed during ${task}: No response received.`,
     );
   }
 
