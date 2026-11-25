@@ -51,13 +51,13 @@ export function InferenceBadge({
 
     const ready = onDeviceStatus === 'available';
     const progressSuffix =
-      typeof downloadProgress === 'number' && downloadProgress > 0
-        ? ` (${downloadProgress}%)`
+      typeof downloadProgress === 'number' && downloadProgress >= 0
+        ? ` (${downloadProgress}% • ${100 - downloadProgress}% left)`
         : '';
     const label = ready
       ? 'Gemini Nano Ready'
       : onDeviceStatus === 'downloading'
-        ? `Nano Downloading${progressSuffix}...`
+        ? `Nano Downloading${progressSuffix}`
         : policy === 'local-only'
           ? 'Nano Required (Local-Only)'
           : 'Nano Unavailable • Cloud Fallback';

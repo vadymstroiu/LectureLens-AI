@@ -13,6 +13,7 @@ import {
   buildQuizModelParams,
   chunkTranscriptSegments,
   CLOUD_MODEL_NAME,
+  computeExecutionProgress,
   extractStudyNotes,
   formatLatency,
   generateFlashcards,
@@ -22,6 +23,7 @@ import {
   parseStructuredJson,
   resolveLocalFirstMode,
   sampleFullLectureForWindow,
+  triggerOnDeviceDownload,
 } from '../hybridAi';
 import {
   extractCaptionTrackUrlFromHtml,
@@ -252,6 +254,54 @@ describe('Hybrid AI routing & model configuration', () => {
     expect(sampled).toContain('Segment number 0');
     expect(sampled).toContain('Segment number 199');
     expect(sampled).toContain('...');
+  });
+
+  it('computes monotonic execution current % and remaining % left', () => {
+    expect(computeExecutionProgress(0)).toEqual({
+      percent: 0,
+      remainingPercent: 100,
+    });
+    const mid = computeExecutionProgress(4500, 4500);
+    expect(mid.percent).toBeGreaterThan(50);
+    expect(mid.percent + mid.remainingPercent).toBe(100);
+
+    const longRun = computeExecutionProgress(60000, 4500);
+    expect(longRun.percent).toBe(95);
+    expect(longRun.remainingPercent).toBe(5);
+  });
+
+  it('triggers and monitors Gemini Nano download progress when LanguageModel.create exists', async () => {
+    const originalLm = (globalThis as Record<string, unknown>).LanguageModel;
+    const destroySpy = vi.fn();
+    const progressSpy = vi.fn();
+
+    (globalThis as Record<string, unknown>).LanguageModel = {
+      availability: vi.fn().mockResolvedValue('available'),
+      create: vi.fn().mockImplementation(async (opts?: {
+        monitor?: (m: {
+          addEventListener: (
+            t: string,
+            cb: (e: { loaded: number }) => void,
+          ) => void;
+        }) => void;
+      }) => {
+        opts?.monitor?.({
+          addEventListener: (_t, cb) => {
+            cb({ loaded: 0.63 });
+          },
+        });
+        return { destroy: destroySpy };
+      }),
+    };
+
+    try {
+      const status = await triggerOnDeviceDownload(progressSpy);
+      expect(progressSpy).toHaveBeenCalledWith(63);
+      expect(destroySpy).toHaveBeenCalledTimes(1);
+      expect(status).toBe('available');
+    } finally {
+      (globalThis as Record<string, unknown>).LanguageModel = originalLm;
+    }
   });
 
   it('enforces Strict Local-Only policy and surfaces actionable Nano recovery hint on failure', async () => {

@@ -10,7 +10,7 @@ export interface UserPreferences {
 }
 
 const DEFAULT_PREFS: UserPreferences = {
-  policy: 'hybrid',
+  policy: 'local-only',
   theme: 'dark',
 };
 
@@ -66,7 +66,7 @@ export async function loadPreferences(): Promise<UserPreferences> {
   const result = await storage.get(PREFS_KEY);
   const stored = result[PREFS_KEY] as Partial<UserPreferences> | undefined;
   return {
-    policy: stored?.policy === 'local-only' ? 'local-only' : 'hybrid',
+    policy: stored?.policy === 'hybrid' ? 'hybrid' : 'local-only',
     theme: stored?.theme === 'light' ? 'light' : 'dark',
   };
 }

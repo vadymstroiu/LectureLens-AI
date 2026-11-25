@@ -81,6 +81,14 @@ export interface HybridInferenceDeps {
 interface ChromeLanguageModelGlobal {
   LanguageModel?: {
     availability?: () => Promise<string>;
+    create?: (options?: {
+      monitor?: (m: {
+        addEventListener: (
+          eventType: 'downloadprogress',
+          listener: (e: { loaded: number }) => void,
+        ) => void;
+      }) => void;
+    }) => Promise<{ destroy?: () => void }>;
   };
 }
 
@@ -316,6 +324,54 @@ export function formatLatency(latencyMs: number): string {
   if (!Number.isFinite(latencyMs) || latencyMs < 0) return '0ms';
   if (latencyMs < 1000) return `${Math.round(latencyMs)}ms`;
   return `${(latencyMs / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Computes an asymptotic execution percentage (0..95) + remaining percentage
+ * from elapsed milliseconds while an AI request is running.
+ */
+export function computeExecutionProgress(
+  elapsedMs: number,
+  expectedMs = 4500,
+): { percent: number; remainingPercent: number } {
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return { percent: 0, remainingPercent: 100 };
+  }
+  const safeExpected = expectedMs > 0 ? expectedMs : 4500;
+  const percent = Math.min(
+    95,
+    Math.max(1, Math.round((1 - Math.exp(-elapsedMs / safeExpected)) * 95)),
+  );
+  return {
+    percent,
+    remainingPercent: 100 - percent,
+  };
+}
+
+/**
+ * Explicitly initiates/monitors Chrome's Gemini Nano download from a user click.
+ */
+export async function triggerOnDeviceDownload(
+  onProgress: (percent: number) => void,
+): Promise<OnDeviceAvailability> {
+  const api = (globalThis as unknown as ChromeLanguageModelGlobal).LanguageModel;
+  if (!api?.create) {
+    return checkOnDeviceAvailability();
+  }
+
+  const session = await api.create({
+    monitor: (m) => {
+      m.addEventListener('downloadprogress', (e) => {
+        const pct = Math.min(
+          100,
+          Math.max(0, Math.round((e.loaded ?? 0) * 100)),
+        );
+        onProgress(pct);
+      });
+    },
+  });
+  session?.destroy?.();
+  return checkOnDeviceAvailability();
 }
 
 export function normalizeInferenceSource(

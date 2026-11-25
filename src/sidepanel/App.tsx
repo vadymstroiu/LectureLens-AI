@@ -28,10 +28,13 @@ import {
   analyzeContentWindow,
   checkOnDeviceAvailability,
   chunkTranscriptSegments,
+  computeExecutionProgress,
   extractStudyNotes,
+  formatLatency,
   generateFlashcards,
   generatePracticeQuiz,
   HybridAiError,
+  triggerOnDeviceDownload,
 } from '../lib/hybridAi';
 import type {
   CapturedContent,
@@ -89,7 +92,7 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  const [policy, setPolicy] = useState<HybridRoutingPolicy>('hybrid');
+  const [policy, setPolicy] = useState<HybridRoutingPolicy>('local-only');
   const [onDeviceStatus, setOnDeviceStatus] =
     useState<OnDeviceAvailability>('unavailable');
   const [activeTab, setActiveTab] = useState<ActiveTab>('notes');
@@ -102,7 +105,9 @@ export default function App() {
 
   const [capturing, setCapturing] = useState(false);
   const [loadingTask, setLoadingTask] = useState<ActiveTab | null>(null);
+  const [downloadingNano, setDownloadingNano] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [errorState, setErrorState] = useState<{
     message: string;
     hint?: string;
@@ -163,6 +168,46 @@ export default function App() {
 
     return () => window.clearInterval(timer);
   }, [onDeviceStatus]);
+
+  // Track elapsed execution / download time for live % progress indicator
+  useEffect(() => {
+    if (!loadingTask && !downloadingNano) {
+      setElapsedMs(0);
+      return;
+    }
+
+    const startedAt = performance.now();
+    setElapsedMs(100);
+    const timer = window.setInterval(() => {
+      setElapsedMs(performance.now() - startedAt);
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [loadingTask, downloadingNano]);
+
+  const handleDownloadNano = async () => {
+    setErrorState(null);
+    setDownloadingNano(true);
+    setDownloadProgress(0);
+    setOnDeviceStatus('downloading');
+    try {
+      const nextStatus = await triggerOnDeviceDownload((pct) => {
+        setDownloadProgress(pct);
+      });
+      setOnDeviceStatus(nextStatus);
+      if (nextStatus === 'available') {
+        setStatusBanner('Gemini Nano is downloaded and ready for Local-Only AI!');
+      }
+    } catch (error) {
+      setErrorState({
+        message: 'Could not start Gemini Nano download monitor.',
+        hint: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setDownloadingNano(false);
+      setDownloadProgress(null);
+    }
+  };
 
   const persistSession = useCallback((nextSession: LectureSession) => {
     setSession(nextSession);
@@ -942,33 +987,92 @@ export default function App() {
           )}
         </section>
 
-        {/* Status or Error Alerts */}
-        {loadingTask &&
-          policy === 'local-only' &&
-          onDeviceStatus !== 'available' && (
-            <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-800 dark:text-amber-200">
-              <p className="font-semibold">
-                Chrome is downloading Gemini Nano
-                {typeof downloadProgress === 'number' && downloadProgress > 0
-                  ? ` (${downloadProgress}%)`
-                  : '...'}
-              </p>
-              <p className="leading-relaxed opacity-90">
-                First-time on-device setup downloads ~1.7 GB in the background. In{' '}
-                <strong>Local-Only</strong> mode this waits until download completes,
-                or you can switch to <strong>Hybrid</strong> for instant Cloud Gemini
-                3.8 Flash while Nano finishes.
-              </p>
-              <button
-                type="button"
-                onClick={() => updatePolicy('hybrid')}
-                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500"
-              >
-                <Zap className="h-3 w-3" />
-                Switch to Hybrid (Instant Cloud Fallback)
-              </button>
+        {/* Live Execution / Download Progress Card */}
+        {(loadingTask !== null || downloadingNano) && (() => {
+          const isNanoDl = downloadProgress !== null;
+          const execProgress = computeExecutionProgress(
+            elapsedMs,
+            loadingTask === 'quiz' ? 6500 : 4000,
+          );
+          const currentPct = isNanoDl ? downloadProgress : execProgress.percent;
+          const leftPct = 100 - currentPct;
+          const taskTitle = isNanoDl
+            ? 'Downloading Gemini Nano'
+            : loadingTask === 'notes'
+              ? 'Extracting Study Notes'
+              : loadingTask === 'flashcards'
+                ? 'Creating Flashcards'
+                : 'Generating Cloud Quiz';
+
+          return (
+            <div className="space-y-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-3 text-xs">
+              <div className="flex items-center justify-between gap-2 font-semibold text-indigo-800 dark:text-indigo-200">
+                <span>{taskTitle}</span>
+                <span className="font-mono text-[11px]">
+                  {currentPct}% • {leftPct}% left
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-indigo-200/70 dark:bg-slate-800">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-150"
+                  style={{ width: `${currentPct}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-indigo-700/80 dark:text-indigo-300/80">
+                <span>
+                  {isNanoDl
+                    ? 'One-time Chrome on-device model download'
+                    : policy === 'local-only' && loadingTask !== 'quiz'
+                      ? 'Running on-device (Local-Only)'
+                      : 'Running via Firebase AI Logic'}
+                </span>
+                <span className="font-mono">{formatLatency(elapsedMs)} elapsed</span>
+              </div>
             </div>
-          )}
+          );
+        })()}
+
+        {/* Status or Error Alerts */}
+        {(onDeviceStatus === 'downloadable' ||
+          (onDeviceStatus === 'downloading' && !downloadingNano)) && (
+          <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-800 dark:text-amber-200">
+            <p className="font-semibold">
+              {onDeviceStatus === 'downloading'
+                ? 'Chrome is downloading Gemini Nano in the background'
+                : 'Gemini Nano is ready to download (~1.7 GB)'}
+              {typeof downloadProgress === 'number'
+                ? ` (${downloadProgress}% • ${100 - downloadProgress}% left)`
+                : ''}
+            </p>
+            <p className="leading-relaxed opacity-90">
+              {policy === 'local-only'
+                ? 'Local-Only mode is active (default). Track live download % below, or switch to Hybrid for Cloud fallback anytime.'
+                : 'Hybrid mode will automatically use Cloud fallback until Nano finishes downloading.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {!loadingTask && (
+                <button
+                  type="button"
+                  onClick={handleDownloadNano}
+                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-500"
+                >
+                  <Download className="h-3 w-3" />
+                  Track / Download Gemini Nano
+                </button>
+              )}
+              {policy === 'local-only' && (
+                <button
+                  type="button"
+                  onClick={() => updatePolicy('hybrid')}
+                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500"
+                >
+                  <Zap className="h-3 w-3" />
+                  Switch to Hybrid
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {statusBanner && (
           <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/10 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-200">
