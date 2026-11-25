@@ -705,6 +705,15 @@ export default function App() {
     });
   };
 
+  const handleResetMastered = () => {
+    if (!session) return;
+    persistSession({
+      ...session,
+      masteredCardIds: [],
+      updatedAt: Date.now(),
+    });
+  };
+
   const handleSelectQuizAnswer = (questionId: string, optionIndex: number) => {
     if (!session) return;
     persistSession({
@@ -995,7 +1004,6 @@ export default function App() {
             loadingTask === 'quiz' ? 6500 : 4000,
           );
           const currentPct = isNanoDl ? downloadProgress : execProgress.percent;
-          const leftPct = 100 - currentPct;
           const taskTitle = isNanoDl
             ? 'Downloading Gemini Nano'
             : loadingTask === 'notes'
@@ -1008,9 +1016,7 @@ export default function App() {
             <div className="space-y-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-3 text-xs">
               <div className="flex items-center justify-between gap-2 font-semibold text-indigo-800 dark:text-indigo-200">
                 <span>{taskTitle}</span>
-                <span className="font-mono text-[11px]">
-                  {currentPct}% • {leftPct}% left
-                </span>
+                <span className="font-mono text-[11px]">{currentPct}%</span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-indigo-200/70 dark:bg-slate-800">
                 <div
@@ -1041,7 +1047,7 @@ export default function App() {
                 ? 'Chrome is downloading Gemini Nano in the background'
                 : 'Gemini Nano is ready to download (~1.7 GB)'}
               {typeof downloadProgress === 'number'
-                ? ` (${downloadProgress}% • ${100 - downloadProgress}% left)`
+                ? ` (${downloadProgress}%)`
                 : ''}
             </p>
             <p className="leading-relaxed opacity-90">
@@ -1169,6 +1175,7 @@ export default function App() {
             policy={policy}
             onGenerate={handleGenerateFlashcards}
             onToggleMastered={handleToggleMastered}
+            onResetMastered={handleResetMastered}
             onSeekVideo={handleSeekVideo}
           />
         )}
