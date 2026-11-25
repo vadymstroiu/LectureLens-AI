@@ -21,6 +21,7 @@ import type {
   OnDeviceAvailability,
   QuizData,
   QuizQuestion,
+  SimpleExplanation,
   StudyNotesData,
   StudyTaskKind,
   TranscriptChunk,
@@ -175,6 +176,17 @@ export const quizSchema = Schema.object({
   },
 });
 
+export const simpleExplanationSchema = Schema.object({
+  properties: {
+    analogy: Schema.string({
+      description: 'A 1-2 sentence intuitive everyday analogy.',
+    }),
+    keyIdea: Schema.string({
+      description: 'One crisp takeaway sentence.',
+    }),
+  },
+});
+
 // Plain JSON Schema constraints for Chrome's on-device Prompt API
 const STUDY_NOTES_JSON_CONSTRAINT = {
   type: 'object',
@@ -228,6 +240,15 @@ const FLASHCARDS_JSON_CONSTRAINT = {
     },
   },
   required: ['cards'],
+};
+
+const SIMPLE_EXPLANATION_JSON_CONSTRAINT = {
+  type: 'object',
+  properties: {
+    analogy: { type: 'string' },
+    keyIdea: { type: 'string' },
+  },
+  required: ['analogy', 'keyIdea'],
 };
 
 // --- Helper Utilities ---
@@ -524,6 +545,69 @@ export function buildQuizModelParams(): HybridParams {
         temperature: 0.3,
       },
     },
+  };
+}
+
+export function buildExplainModelParams(
+  policy: HybridRoutingPolicy,
+  onDownloadProgress?: (percent: number) => void,
+): HybridParams {
+  return {
+    mode: resolveLocalFirstMode(policy),
+    inCloudParams: {
+      model: CLOUD_MODEL_NAME,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: simpleExplanationSchema,
+        temperature: 0.3,
+      },
+    },
+    onDeviceParams: {
+      createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
+      promptOptions: {
+        responseConstraint: SIMPLE_EXPLANATION_JSON_CONSTRAINT,
+      },
+    },
+  };
+}
+
+export interface TelemetrySummary {
+  localCount: number;
+  cloudCount: number;
+  avgLocalMs: number;
+  avgCloudMs: number;
+  onDevicePercent: number;
+}
+
+export function summarizeTelemetry(
+  history: InferenceTelemetry[],
+): TelemetrySummary {
+  if (!history.length) {
+    return {
+      localCount: 0,
+      cloudCount: 0,
+      avgLocalMs: 0,
+      avgCloudMs: 0,
+      onDevicePercent: 0,
+    };
+  }
+
+  const localCalls = history.filter((h) => h.source === 'ON_DEVICE');
+  const cloudCalls = history.filter((h) => h.source === 'IN_CLOUD');
+
+  const avg = (items: InferenceTelemetry[]) =>
+    items.length
+      ? Math.round(
+          items.reduce((acc, item) => acc + item.latencyMs, 0) / items.length,
+        )
+      : 0;
+
+  return {
+    localCount: localCalls.length,
+    cloudCount: cloudCalls.length,
+    avgLocalMs: avg(localCalls),
+    avgCloudMs: avg(cloudCalls),
+    onDevicePercent: Math.round((localCalls.length / history.length) * 100),
   };
 }
 
@@ -886,4 +970,52 @@ export async function generatePracticeQuiz(
     });
 
   return { data: { questions }, telemetry };
+}
+
+/**
+ * Cloud -> On-Device Tutor Loop:
+ * Takes a hard definition or missed Cloud Quiz concept and generates a quick
+ * plain-English analogy + key idea on-device (or Cloud fallback in Hybrid mode).
+ */
+export async function explainConceptSimply(
+  concept: string,
+  context: string,
+  policy: HybridRoutingPolicy,
+  deps?: HybridInferenceDeps,
+): Promise<HybridCallResult<SimpleExplanation>> {
+  const cleanConcept = concept.trim();
+  const cleanContext = trimForWindow(context, 2500);
+  if (!cleanConcept) {
+    throw new HybridAiError(
+      'EMPTY_CONTENT',
+      'No concept was provided to explain.',
+    );
+  }
+
+  const prompt = [
+    'You are a friendly peer tutor. Explain the concept below in plain, intuitive language.',
+    'Return ONLY valid JSON with:',
+    '- analogy: 1-2 sentence everyday analogy making the concept click.',
+    '- keyIdea: 1 crisp takeaway sentence summarizing why it matters.',
+    '',
+    `CONCEPT: ${cleanConcept}`,
+    cleanContext ? `CONTEXT:\n${cleanContext}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const { parsed, telemetry } = await runHybridTask<SimpleExplanation>(
+    'explain',
+    buildExplainModelParams(policy, deps?.onDownloadProgress),
+    prompt,
+    deps,
+  );
+
+  return {
+    data: {
+      analogy: (parsed.analogy ?? '').trim(),
+      keyIdea: (parsed.keyIdea ?? '').trim(),
+    },
+    telemetry,
+  };
 }

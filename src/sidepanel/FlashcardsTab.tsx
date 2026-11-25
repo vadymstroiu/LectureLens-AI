@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   CheckCircle2,
   ChevronLeft,
@@ -64,19 +64,19 @@ export function FlashcardsTab({
     setFlipped(false);
   }, [hideMastered, visibleCards.length]);
 
-  const goPrev = () => {
+  const goPrev = useCallback(() => {
     if (!visibleCards.length) return;
     setFlipped(false);
     setIndex((prev) => (prev - 1 + visibleCards.length) % visibleCards.length);
-  };
+  }, [visibleCards.length]);
 
-  const goNext = () => {
+  const goNext = useCallback(() => {
     if (!visibleCards.length) return;
     setFlipped(false);
     setIndex((prev) => (prev + 1) % visibleCards.length);
-  };
+  }, [visibleCards.length]);
 
-  const handleToggleMasteredAndAdvance = () => {
+  const handleToggleMasteredAndAdvance = useCallback(() => {
     if (!activeCard) return;
     const wasMastered = masteredCardIds.includes(activeCard.id);
     setFlipped(false);
@@ -87,7 +87,40 @@ export function FlashcardsTab({
     if (!wasMastered && !hideMastered && visibleCards.length > 1) {
       setIndex((prev) => (prev + 1) % visibleCards.length);
     }
-  };
+  }, [activeCard, hideMastered, masteredCardIds, onToggleMastered, visibleCards.length]);
+
+  useEffect(() => {
+    if (!activeCard) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        setFlipped((prev) => !prev);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        goPrev();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        handleToggleMasteredAndAdvance();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeCard, goNext, goPrev, handleToggleMasteredAndAdvance]);
 
   return (
     <div className="space-y-4">
@@ -279,6 +312,9 @@ export function FlashcardsTab({
                   <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>
+              <p className="text-center text-[10px] text-slate-400">
+                Shortcuts: Space flip • ←/→ nav • M master
+              </p>
             </>
           ) : (
             <div className="space-y-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-center">

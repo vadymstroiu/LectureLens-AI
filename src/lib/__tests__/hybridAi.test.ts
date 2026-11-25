@@ -8,12 +8,14 @@ import {
 } from 'firebase/ai';
 import {
   analyzeContentWindow,
+  buildExplainModelParams,
   buildFlashcardsModelParams,
   buildNotesModelParams,
   buildQuizModelParams,
   chunkTranscriptSegments,
   CLOUD_MODEL_NAME,
   computeExecutionProgress,
+  explainConceptSimply,
   extractStudyNotes,
   formatLatency,
   generateFlashcards,
@@ -23,6 +25,7 @@ import {
   parseStructuredJson,
   resolveLocalFirstMode,
   sampleFullLectureForWindow,
+  summarizeTelemetry,
   triggerOnDeviceDownload,
 } from '../hybridAi';
 import {
@@ -302,6 +305,99 @@ describe('Hybrid AI routing & model configuration', () => {
     } finally {
       (globalThis as Record<string, unknown>).LanguageModel = originalLm;
     }
+  });
+
+  it('runs Cloud->On-Device Explain Simply tutor loop with structured JSON and telemetry', async () => {
+    let capturedParams: HybridParams | undefined;
+    let tick = 500;
+
+    const paramsCheck = buildExplainModelParams('hybrid');
+    expect(paramsCheck.mode).toBe(InferenceMode.PREFER_ON_DEVICE);
+    expect(paramsCheck.inCloudParams?.model).toBe(CLOUD_MODEL_NAME);
+
+    const result = await explainConceptSimply(
+      'App Check',
+      'Protects Firebase backends from unauthorized requests.',
+      'hybrid',
+      {
+        ai: MOCK_AI,
+        now: () => {
+          const current = tick;
+          tick += 310;
+          return current;
+        },
+        modelFactory: (_ai, params) => {
+          capturedParams = params;
+          return {
+            generateContent: vi.fn().mockResolvedValue(
+              createMockResult(
+                {
+                  analogy: 'Like a venue bouncer checking a stamped wristband.',
+                  keyIdea: 'Ensures only your genuine app talks to Firebase.',
+                },
+                InferenceSource.ON_DEVICE,
+              ),
+            ),
+          };
+        },
+      },
+    );
+
+    expect(capturedParams?.mode).toBe(InferenceMode.PREFER_ON_DEVICE);
+    expect(result.telemetry.task).toBe('explain');
+    expect(result.telemetry.source).toBe('ON_DEVICE');
+    expect(result.telemetry.latencyMs).toBe(310);
+    expect(result.data.analogy).toContain('wristband');
+    expect(result.data.keyIdea).toContain('genuine app');
+  });
+
+  it('summarizes local vs cloud telemetry averages and on-device ratio', () => {
+    expect(summarizeTelemetry([])).toEqual({
+      localCount: 0,
+      cloudCount: 0,
+      avgLocalMs: 0,
+      avgCloudMs: 0,
+      onDevicePercent: 0,
+    });
+
+    const summary = summarizeTelemetry([
+      {
+        source: 'ON_DEVICE',
+        latencyMs: 300,
+        task: 'notes',
+        modelLabel: 'Gemini Nano',
+        timestamp: 1,
+      },
+      {
+        source: 'ON_DEVICE',
+        latencyMs: 500,
+        task: 'flashcards',
+        modelLabel: 'Gemini Nano',
+        timestamp: 2,
+      },
+      {
+        source: 'ON_DEVICE',
+        latencyMs: 400,
+        task: 'explain',
+        modelLabel: 'Gemini Nano',
+        timestamp: 3,
+      },
+      {
+        source: 'IN_CLOUD',
+        latencyMs: 1600,
+        task: 'quiz',
+        modelLabel: CLOUD_MODEL_NAME,
+        timestamp: 4,
+      },
+    ]);
+
+    expect(summary).toEqual({
+      localCount: 3,
+      cloudCount: 1,
+      avgLocalMs: 400,
+      avgCloudMs: 1600,
+      onDevicePercent: 75,
+    });
   });
 
   it('enforces Strict Local-Only policy and surfaces actionable Nano recovery hint on failure', async () => {

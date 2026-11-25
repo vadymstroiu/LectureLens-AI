@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Cloud, Cpu, History, Zap } from 'lucide-react';
+import { Cloud, Cpu, History, WifiOff, Zap } from 'lucide-react';
 import type {
   HybridRoutingPolicy,
   InferenceTelemetry,
   OnDeviceAvailability,
 } from '../types/lecture';
-import { formatLatency } from '../lib/hybridAi';
+import { formatLatency, summarizeTelemetry } from '../lib/hybridAi';
 
 interface InferenceBadgeProps {
   telemetry?: InferenceTelemetry;
@@ -13,6 +13,7 @@ interface InferenceBadgeProps {
   onDeviceStatus: OnDeviceAvailability;
   policy: HybridRoutingPolicy;
   downloadProgress?: number | null;
+  isOnline?: boolean;
 }
 
 export function InferenceBadge({
@@ -21,8 +22,10 @@ export function InferenceBadge({
   onDeviceStatus,
   policy,
   downloadProgress,
+  isOnline = true,
 }: InferenceBadgeProps) {
   const [showLog, setShowLog] = useState(false);
+  const summary = summarizeTelemetry(history);
 
   const renderPrimaryBadge = () => {
     if (telemetry) {
@@ -77,14 +80,23 @@ export function InferenceBadge({
   };
 
   return (
-    <div className="relative flex items-center gap-1.5">
+    <div className="relative flex flex-wrap items-center gap-1.5">
       {renderPrimaryBadge()}
+      {!isOnline && (
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300"
+          title="Browser is offline — Local Gemini Nano & cached sessions remain available"
+        >
+          <WifiOff className="h-2.5 w-2.5" />
+          Offline
+        </span>
+      )}
       {history.length > 0 && (
         <button
           type="button"
           onClick={() => setShowLog((prev) => !prev)}
           className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-          title="View hybrid inference telemetry log"
+          title="View hybrid inference telemetry summary & log"
           aria-label="Toggle telemetry history"
         >
           <History className="h-3 w-3" />
@@ -92,9 +104,9 @@ export function InferenceBadge({
       )}
 
       {showLog && history.length > 0 && (
-        <div className="absolute top-8 left-0 z-30 w-68 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="absolute top-8 left-0 z-30 w-72 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold tracking-wider text-slate-500 uppercase dark:text-slate-400">
-            <span>Recent Inference Calls</span>
+            <span>Hybrid Telemetry ({summary.onDevicePercent}% Local)</span>
             <button
               type="button"
               onClick={() => setShowLog(false)}
@@ -103,6 +115,30 @@ export function InferenceBadge({
               Close
             </button>
           </div>
+
+          <div className="mb-2 grid grid-cols-2 gap-1.5 rounded-lg bg-slate-50 p-2 text-[10px] dark:bg-slate-800/80">
+            <div>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                ⚡ Local: {summary.localCount}
+              </span>
+              <p className="text-slate-500 dark:text-slate-400">
+                {summary.localCount > 0
+                  ? `avg ${formatLatency(summary.avgLocalMs)}`
+                  : 'no calls yet'}
+              </p>
+            </div>
+            <div>
+              <span className="font-semibold text-sky-600 dark:text-sky-400">
+                ☁️ Cloud: {summary.cloudCount}
+              </span>
+              <p className="text-slate-500 dark:text-slate-400">
+                {summary.cloudCount > 0
+                  ? `avg ${formatLatency(summary.avgCloudMs)}`
+                  : 'no calls yet'}
+              </p>
+            </div>
+          </div>
+
           <ul className="space-y-1">
             {history.slice(0, 5).map((entry, idx) => (
               <li

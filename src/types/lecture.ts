@@ -71,6 +71,11 @@ export interface QuizData {
   questions: QuizQuestion[];
 }
 
+export interface SimpleExplanation {
+  analogy: string;
+  keyIdea: string;
+}
+
 export type InferenceSourceValue = 'ON_DEVICE' | 'IN_CLOUD';
 
 export type HybridRoutingPolicy = 'hybrid' | 'local-only';
@@ -81,7 +86,7 @@ export type OnDeviceAvailability =
   | 'downloading'
   | 'unavailable';
 
-export type StudyTaskKind = 'notes' | 'flashcards' | 'quiz';
+export type StudyTaskKind = 'notes' | 'flashcards' | 'quiz' | 'explain';
 
 export interface InferenceTelemetry {
   source: InferenceSourceValue;
@@ -99,6 +104,7 @@ export interface LectureSession {
   masteredCardIds: string[];
   quiz?: QuizData;
   quizAnswers: Record<string, number>;
+  explanations?: Record<string, SimpleExplanation>;
   lastTelemetry?: InferenceTelemetry;
   telemetryHistory: InferenceTelemetry[];
   updatedAt: number;

@@ -10,7 +10,7 @@ export interface UserPreferences {
 }
 
 const DEFAULT_PREFS: UserPreferences = {
-  policy: 'local-only',
+  policy: 'hybrid',
   theme: 'dark',
 };
 
@@ -48,6 +48,34 @@ export async function saveSession(session: LectureSession): Promise<void> {
   });
 }
 
+export async function listSavedSessions(): Promise<LectureSession[]> {
+  const storage = getChromeStorage();
+  if (!storage) return [];
+
+  const all = await storage.get(null);
+  const sessions: LectureSession[] = [];
+  for (const [key, value] of Object.entries(all)) {
+    if (!key.startsWith(SESSION_PREFIX)) continue;
+    if (value && typeof value === 'object' && 'sourceId' in value && 'content' in value) {
+      sessions.push(value as LectureSession);
+    }
+  }
+
+  return sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+}
+
+export async function deleteSession(sourceId: string): Promise<void> {
+  const storage = getChromeStorage();
+  if (!storage || !sourceId) return;
+
+  const key = `${SESSION_PREFIX}${sourceId}`;
+  const meta = await storage.get(LAST_SOURCE_KEY);
+  await storage.remove(key);
+  if (meta[LAST_SOURCE_KEY] === sourceId) {
+    await storage.remove(LAST_SOURCE_KEY);
+  }
+}
+
 export async function loadLastActiveSession(): Promise<LectureSession | null> {
   const storage = getChromeStorage();
   if (!storage) return null;
@@ -66,7 +94,7 @@ export async function loadPreferences(): Promise<UserPreferences> {
   const result = await storage.get(PREFS_KEY);
   const stored = result[PREFS_KEY] as Partial<UserPreferences> | undefined;
   return {
-    policy: stored?.policy === 'hybrid' ? 'hybrid' : 'local-only',
+    policy: stored?.policy === 'local-only' ? 'local-only' : 'hybrid',
     theme: stored?.theme === 'light' ? 'light' : 'dark',
   };
 }

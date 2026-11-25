@@ -3,12 +3,17 @@ import {
   Clock,
   Cloud,
   HelpCircle,
+  Lightbulb,
   Loader2,
   Lock,
   RotateCcw,
   XCircle,
 } from 'lucide-react';
-import type { HybridRoutingPolicy, QuizData } from '../types/lecture';
+import type {
+  HybridRoutingPolicy,
+  QuizData,
+  SimpleExplanation,
+} from '../types/lecture';
 
 interface QuizTabProps {
   quiz?: QuizData;
@@ -16,10 +21,13 @@ interface QuizTabProps {
   hasContent: boolean;
   isLoading: boolean;
   policy: HybridRoutingPolicy;
+  explanations?: Record<string, SimpleExplanation>;
+  explainingKey?: string | null;
   onGenerate: () => void;
   onSelectAnswer: (questionId: string, optionIndex: number) => void;
   onResetQuiz: () => void;
   onSeekVideo: (startSeconds: number) => void;
+  onExplainConcept?: (key: string, concept: string, context: string) => void;
 }
 
 export function QuizTab({
@@ -28,10 +36,13 @@ export function QuizTab({
   hasContent,
   isLoading,
   policy,
+  explanations = {},
+  explainingKey,
   onGenerate,
   onSelectAnswer,
   onResetQuiz,
   onSeekVideo,
+  onExplainConcept,
 }: QuizTabProps) {
   const questions = quiz?.questions ?? [];
   const answeredCount = questions.filter((q) => answers[q.id] !== undefined).length;
@@ -112,6 +123,10 @@ export function QuizTab({
           {questions.map((q, qIdx) => {
             const selected = answers[q.id];
             const isAnswered = selected !== undefined;
+            const isWrong = isAnswered && selected !== q.correctIndex;
+            const explainKey = `quiz:${q.id}`;
+            const simpleExp = explanations[explainKey];
+            const isExplaining = explainingKey === explainKey;
 
             return (
               <article
@@ -174,12 +189,62 @@ export function QuizTab({
                 </div>
 
                 {isAnswered && (
-                  <p className="rounded-lg bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
-                    <span className="font-semibold text-slate-800 dark:text-slate-100">
-                      Explanation:{' '}
-                    </span>
-                    {q.explanation}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="rounded-lg bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">
+                        Explanation:{' '}
+                      </span>
+                      {q.explanation}
+                    </p>
+
+                    {onExplainConcept && !simpleExp && (
+                      <button
+                        type="button"
+                        disabled={Boolean(explainingKey)}
+                        onClick={() =>
+                          onExplainConcept(
+                            explainKey,
+                            q.question,
+                            `${q.explanation} Correct answer: ${q.options[q.correctIndex] ?? ''}`,
+                          )
+                        }
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold transition disabled:opacity-50 ${
+                          isWrong
+                            ? 'bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/30 hover:bg-amber-500/25 dark:text-amber-300'
+                            : 'bg-indigo-500/10 text-indigo-600 hover:bg-indigo-500/20 dark:text-indigo-300'
+                        }`}
+                      >
+                        {isExplaining ? (
+                          <>
+                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                            <span>Tutoring on-device...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lightbulb className="h-2.5 w-2.5" />
+                            <span>
+                              {isWrong
+                                ? 'Missed this? Explain Simply (Nano)'
+                                : 'Explain Simply (Nano)'}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {simpleExp && (
+                      <div className="space-y-1 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-2 text-[11px] text-emerald-900 dark:text-emerald-200">
+                        <p>
+                          <span className="font-semibold">Nano Analogy: </span>
+                          {simpleExp.analogy}
+                        </p>
+                        <p>
+                          <span className="font-semibold">Key Idea: </span>
+                          {simpleExp.keyIdea}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </article>
             );

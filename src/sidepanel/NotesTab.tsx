@@ -1,13 +1,20 @@
-import { BookOpen, Clock, Loader2, Sparkles } from 'lucide-react';
-import type { HybridRoutingPolicy, StudyNotesData } from '../types/lecture';
+import { BookOpen, Clock, Lightbulb, Loader2, Sparkles } from 'lucide-react';
+import type {
+  HybridRoutingPolicy,
+  SimpleExplanation,
+  StudyNotesData,
+} from '../types/lecture';
 
 interface NotesTabProps {
   notes?: StudyNotesData;
   hasContent: boolean;
   isLoading: boolean;
   policy: HybridRoutingPolicy;
+  explanations?: Record<string, SimpleExplanation>;
+  explainingKey?: string | null;
   onGenerate: () => void;
   onSeekVideo: (startSeconds: number) => void;
+  onExplainConcept?: (key: string, concept: string, context: string) => void;
 }
 
 export function NotesTab({
@@ -15,8 +22,11 @@ export function NotesTab({
   hasContent,
   isLoading,
   policy,
+  explanations = {},
+  explainingKey,
   onGenerate,
   onSeekVideo,
+  onExplainConcept,
 }: NotesTabProps) {
   return (
     <div className="space-y-4">
@@ -99,26 +109,68 @@ export function NotesTab({
               Key Definitions ({notes.definitions.length})
             </h3>
             <dl className="space-y-2">
-              {notes.definitions.map((def, idx) => (
-                <div
-                  key={`${def.term}-${idx}`}
-                  className="rounded-lg bg-slate-50 p-2.5 dark:bg-slate-800/70"
-                >
-                  <dt className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
-                    <span>{def.term}</span>
-                    <button
-                      type="button"
-                      onClick={() => onSeekVideo(def.startSeconds)}
-                      className="inline-flex shrink-0 items-center gap-1 rounded bg-slate-200/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-700 hover:bg-indigo-500/20 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:text-indigo-300"
-                    >
-                      {def.timestamp}
-                    </button>
-                  </dt>
-                  <dd className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                    {def.definition}
-                  </dd>
-                </div>
-              ))}
+              {notes.definitions.map((def, idx) => {
+                const explainKey = `def:${def.term}`;
+                const explanation = explanations[explainKey];
+                const isExplaining = explainingKey === explainKey;
+
+                return (
+                  <div
+                    key={`${def.term}-${idx}`}
+                    className="rounded-lg bg-slate-50 p-2.5 dark:bg-slate-800/70"
+                  >
+                    <dt className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
+                      <span>{def.term}</span>
+                      <button
+                        type="button"
+                        onClick={() => onSeekVideo(def.startSeconds)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded bg-slate-200/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-700 hover:bg-indigo-500/20 hover:text-indigo-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:text-indigo-300"
+                      >
+                        {def.timestamp}
+                      </button>
+                    </dt>
+                    <dd className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                      {def.definition}
+                    </dd>
+
+                    {onExplainConcept && !explanation && (
+                      <button
+                        type="button"
+                        disabled={Boolean(explainingKey)}
+                        onClick={() =>
+                          onExplainConcept(explainKey, def.term, def.definition)
+                        }
+                        className="mt-2 inline-flex items-center gap-1 rounded-md bg-indigo-500/10 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 transition hover:bg-indigo-500/20 disabled:opacity-50 dark:text-indigo-300"
+                      >
+                        {isExplaining ? (
+                          <>
+                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                            <span>Simplifying...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lightbulb className="h-2.5 w-2.5" />
+                            <span>Explain Simply (Nano)</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {explanation && (
+                      <div className="mt-2 space-y-1 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-2 text-[11px] text-emerald-900 dark:text-emerald-200">
+                        <p>
+                          <span className="font-semibold">Analogy: </span>
+                          {explanation.analogy}
+                        </p>
+                        <p>
+                          <span className="font-semibold">Key Idea: </span>
+                          {explanation.keyIdea}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </dl>
           </section>
         </div>

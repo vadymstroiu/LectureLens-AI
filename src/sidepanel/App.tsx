@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -8,6 +8,7 @@ import {
   ClipboardCopy,
   Download,
   FileText,
+  FolderOpen,
   HardDrive,
   HelpCircle,
   Layers,
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
+  Trash2,
   Youtube,
   Zap,
 } from 'lucide-react';
@@ -29,6 +31,7 @@ import {
   checkOnDeviceAvailability,
   chunkTranscriptSegments,
   computeExecutionProgress,
+  explainConceptSimply,
   extractStudyNotes,
   formatLatency,
   generateFlashcards,
@@ -56,6 +59,8 @@ import {
   formatStudyMarkdown,
 } from './exporters';
 import {
+  deleteSession,
+  listSavedSessions,
   loadLastActiveSession,
   loadPreferences,
   loadSession,
@@ -92,12 +97,17 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  const [policy, setPolicy] = useState<HybridRoutingPolicy>('local-only');
+  const [policy, setPolicy] = useState<HybridRoutingPolicy>('hybrid');
   const [onDeviceStatus, setOnDeviceStatus] =
     useState<OnDeviceAvailability>('unavailable');
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
   const [activeTab, setActiveTab] = useState<ActiveTab>('notes');
 
   const [session, setSession] = useState<LectureSession | null>(null);
+  const [savedSessions, setSavedSessions] = useState<LectureSession[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [selectedChunkId, setSelectedChunkId] = useState<string>('chunk-1');
   const [pasteDrawerOpen, setPasteDrawerOpen] = useState(false);
   const [pastedText, setPastedText] = useState('');
@@ -105,6 +115,7 @@ export default function App() {
 
   const [capturing, setCapturing] = useState(false);
   const [loadingTask, setLoadingTask] = useState<ActiveTab | null>(null);
+  const [explainingKey, setExplainingKey] = useState<string | null>(null);
   const [downloadingNano, setDownloadingNano] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -116,28 +127,43 @@ export default function App() {
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [dismissedSetupBanner, setDismissedSetupBanner] = useState(false);
+  const nanoPrewarmAttemptedRef = useRef(false);
 
   const firebaseReady = isFirebaseConfigured();
 
-  // Initialize theme, routing preferences, Gemini Nano readiness, and last offline session
+  // Initialize theme, routing preferences, Gemini Nano readiness, and offline library
   useEffect(() => {
     let mounted = true;
     void (async () => {
-      const [prefs, lastSession, nanoStatus] = await Promise.all([
+      const [prefs, lastSession, allSessions, nanoStatus] = await Promise.all([
         loadPreferences(),
         loadLastActiveSession(),
+        listSavedSessions(),
         checkOnDeviceAvailability(),
       ]);
       if (!mounted) return;
       setTheme(prefs.theme);
       setPolicy(prefs.policy);
       setOnDeviceStatus(nanoStatus);
+      setSavedSessions(allSessions);
       if (lastSession) {
         setSession(lastSession);
       }
     })();
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  // Track online/offline network status in real time
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
@@ -209,10 +235,60 @@ export default function App() {
     }
   };
 
+  const handleFirstClickPrewarm = () => {
+    if (
+      nanoPrewarmAttemptedRef.current ||
+      onDeviceStatus !== 'downloadable' ||
+      downloadingNano
+    ) {
+      return;
+    }
+    nanoPrewarmAttemptedRef.current = true;
+    setDownloadingNano(true);
+    setDownloadProgress(0);
+    setOnDeviceStatus('downloading');
+
+    void triggerOnDeviceDownload((pct) => {
+      setDownloadProgress(pct);
+    })
+      .then((nextStatus) => {
+        setOnDeviceStatus(nextStatus);
+        if (nextStatus === 'available') {
+          setStatusBanner('Gemini Nano is ready for private on-device AI!');
+        }
+      })
+      .catch(() => {
+        // Silent background pre-warm failure should never interrupt Hybrid mode
+      })
+      .finally(() => {
+        setDownloadingNano(false);
+        setDownloadProgress(null);
+      });
+  };
+
   const persistSession = useCallback((nextSession: LectureSession) => {
     setSession(nextSession);
-    void saveSession(nextSession);
+    void saveSession(nextSession).then(() =>
+      listSavedSessions().then(setSavedSessions),
+    );
   }, []);
+
+  const handleSelectSavedSession = (target: LectureSession) => {
+    setSession(target);
+    setLibraryOpen(false);
+    setErrorState(null);
+    setStatusBanner(`Loaded "${target.content.title}" from offline library.`);
+    void saveSession(target);
+  };
+
+  const handleDeleteSavedSession = async (sourceId: string) => {
+    await deleteSession(sourceId);
+    const remaining = await listSavedSessions();
+    setSavedSessions(remaining);
+    if (session?.sourceId === sourceId) {
+      setSession(remaining[0] ?? null);
+    }
+  };
 
   const updatePolicy = (nextPolicy: HybridRoutingPolicy) => {
     setPolicy(nextPolicy);
@@ -735,6 +811,39 @@ export default function App() {
     });
   };
 
+  const handleExplainConcept = async (
+    key: string,
+    concept: string,
+    context: string,
+  ) => {
+    if (!session) return;
+    setErrorState(null);
+    setExplainingKey(key);
+    try {
+      const { data, telemetry } = await explainConceptSimply(
+        concept,
+        context,
+        policy,
+      );
+      if (telemetry.source === 'ON_DEVICE') {
+        setOnDeviceStatus('available');
+      }
+      persistSession({
+        ...session,
+        explanations: {
+          ...(session.explanations ?? {}),
+          [key]: data,
+        },
+        ...recordTelemetry(session, telemetry),
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      handleAiError(error);
+    } finally {
+      setExplainingKey(null);
+    }
+  };
+
   const handleCopyMarkdown = async () => {
     if (!session) return;
     const md = formatStudyMarkdown(session);
@@ -760,7 +869,10 @@ export default function App() {
   const canExportCsv = Boolean(session?.flashcards?.cards.length);
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div
+      onClickCapture={handleFirstClickPrewarm}
+      className="flex min-h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
+    >
       {/* Header Bar */}
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-3.5 py-2.5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90">
         <div className="flex items-center justify-between gap-2">
@@ -832,18 +944,91 @@ export default function App() {
             onDeviceStatus={onDeviceStatus}
             policy={policy}
             downloadProgress={downloadProgress}
+            isOnline={isOnline}
           />
-          {session && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
-              <HardDrive className="h-2.5 w-2.5" />
-              Saved offline
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {savedSessions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setLibraryOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Browse saved offline lecture sessions"
+              >
+                <FolderOpen className="h-2.5 w-2.5 text-indigo-500" />
+                Library ({savedSessions.length})
+              </button>
+            )}
+            {session && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
+                <HardDrive className="h-2.5 w-2.5" />
+                Saved
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 space-y-3.5 p-3.5">
+        {libraryOpen && savedSessions.length > 0 && (
+          <section className="space-y-2 rounded-2xl border border-indigo-500/30 bg-white p-3 shadow-sm dark:border-indigo-500/30 dark:bg-slate-900">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[11px] font-semibold tracking-wider text-indigo-600 uppercase dark:text-indigo-400">
+                Offline Study Library
+              </h2>
+              <button
+                type="button"
+                onClick={() => setLibraryOpen(false)}
+                className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+            <ul className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
+              {savedSessions.map((item) => {
+                const isActive = item.sourceId === session?.sourceId;
+                const totalCards = item.flashcards?.cards.length ?? 0;
+                const mastered = item.masteredCardIds.length;
+                return (
+                  <li
+                    key={item.sourceId}
+                    className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-xs ${
+                      isActive
+                        ? 'border-indigo-500/40 bg-indigo-500/10'
+                        : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/60'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSavedSession(item)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <p className="truncate font-semibold text-slate-800 dark:text-slate-100">
+                        {item.content.title}
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        {item.notes ? 'Notes' : 'No notes'}
+                        {totalCards > 0
+                          ? ` • ${mastered}/${totalCards} cards`
+                          : ''}
+                        {item.quiz ? ' • Quiz ready' : ''}
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteSavedSession(item.sourceId)}
+                      className="rounded-lg p-1 text-slate-400 hover:bg-rose-500/10 hover:text-rose-500"
+                      title="Delete saved session"
+                      aria-label={`Delete ${item.content.title}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
         {!firebaseReady && !dismissedSetupBanner && (
           <div className="flex items-start justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-800 dark:text-amber-200">
             <div>
@@ -1161,8 +1346,11 @@ export default function App() {
             hasContent={Boolean(session)}
             isLoading={loadingTask === 'notes'}
             policy={policy}
+            explanations={session?.explanations}
+            explainingKey={explainingKey}
             onGenerate={handleGenerateNotes}
             onSeekVideo={handleSeekVideo}
+            onExplainConcept={handleExplainConcept}
           />
         )}
 
@@ -1187,10 +1375,13 @@ export default function App() {
             hasContent={Boolean(session)}
             isLoading={loadingTask === 'quiz'}
             policy={policy}
+            explanations={session?.explanations}
+            explainingKey={explainingKey}
             onGenerate={handleGenerateQuiz}
             onSelectAnswer={handleSelectQuizAnswer}
             onResetQuiz={handleResetQuiz}
             onSeekVideo={handleSeekVideo}
+            onExplainConcept={handleExplainConcept}
           />
         )}
       </main>

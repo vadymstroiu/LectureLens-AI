@@ -13,10 +13,13 @@ It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, pr
   - **Strict Local-Only Privacy Toggle**: Switches notes & flashcards to `InferenceMode.ONLY_ON_DEVICE` with zero cloud egress and clear Chrome flag recovery guidance if Gemini Nano is not yet downloaded.
   - **Cloud Synthesis (`InferenceMode.ONLY_IN_CLOUD`)**: Generates a 5-question multiple-choice practice quiz across full-length transcripts (`gemini-3.8-flash`).
 - **Guaranteed Structured JSON (`Schema`)**: Every `generateContent` call enforces `responseMimeType: "application/json"` and `responseSchema` (plus `onDeviceParams.promptOptions.responseConstraint` for Gemini Nano).
-- **Live Telemetry & Inference Verification**: Inspects `result.response.inferenceSource` and `performance.now()` latency on every call, displaying a live header badge (`⚡ On-Device (Gemini Nano) • 380ms` or `☁️ Cloud (Gemini) • 1.6s`) and call log.
+- **Live Telemetry & Hybrid Comparison**: Inspects `result.response.inferenceSource` and `performance.now()` latency on every call, displaying a live header badge (`⚡ On-Device (Gemini Nano) • 380ms` or `☁️ Cloud (Gemini) • 1.6s`), offline indicator, and a summary comparing local vs. cloud call counts, average latencies, and `% On-Device` ratio.
+- **Cloud → On-Device Tutor Loop ("Explain Simply")**: Click **Explain Simply (Nano)** on any Key Definition or missed Cloud Practice Quiz question to generate an instant, private 2-sentence analogy + key idea on-device.
+- **First-Click Background Nano Pre-Warming**: Automatically starts downloading Gemini Nano on the user's first interaction inside the Side Panel (complying with Chrome's user-activation requirement) with live `%` progress while **Hybrid** mode remains immediately usable.
 - **One-Click YouTube Transcript Capture & Video Seeking**: Captures timestamped captions directly from `youtube.com` and lets you click any `[mm:ss]` chip in Notes, Flashcards, or Quiz explanations to jump straight to that moment in the video.
-- **Article / Text Capture & Smart Chapter Windowing**: Grab highlighted text from any page or paste notes; transcripts over `6,000` chars automatically split into time-labeled Nano chapters while keeping the full transcript ready for the Cloud Quiz.
-- **Offline Persistence & Export**: Auto-saves sessions per video/document in `chrome.storage.local`, copies formatted Markdown, and exports RFC-4180 Anki `.csv` decks (`front,back`).
+- **Article / Text Capture & Smart Chapter Windowing**: Grab highlighted text from any page or paste notes; transcripts over `6,000` chars automatically split into time-labeled Nano chapters while keeping full-lecture coverage (`60,000`-char evenly sampled spans) ready for the Cloud Quiz.
+- **Active-Recall Flashcards**: Auto-advances on **Mark Mastered**, hides mastered cards by default (with a **Show mastered** toggle), and supports keyboard shortcuts (`Space` flip, `←`/`→` navigate, `M` mark mastered).
+- **Offline Study Library & Export**: Auto-saves multiple lecture sessions in `chrome.storage.local` with a collapsible **Library** switcher, copies formatted Markdown, and exports RFC-4180 Anki `.csv` decks (`front,back`).
 
 ---
 
