@@ -37,6 +37,7 @@ export const CLOUD_MODEL_NAME =
 export type HybridAiErrorCode =
   | 'ON_DEVICE_UNAVAILABLE'
   | 'FIREBASE_NOT_CONFIGURED'
+  | 'RATE_LIMITED'
   | 'EMPTY_CONTENT'
   | 'INVALID_RESPONSE'
   | 'INFERENCE_FAILED';
@@ -487,11 +488,99 @@ function buildOnDeviceRecoveryError(rawError: unknown): HybridAiError {
   );
 }
 
-export function isTransientCloudError(error: unknown): boolean {
+export function isRateLimitError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /\[(429|500|502|503|504)\s*\]|high demand|overloaded|temporarily unavailable|resource exhausted/i.test(
+  return /\[429\s*\]|quota exceeded|rate[- ]limit|resource exhausted/i.test(
     message,
   );
+}
+
+export function extractRetryDelaySeconds(error: unknown): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match =
+    /retry in\s+(\d+(?:\.\d+)?)s/i.exec(message) ??
+    /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i.exec(message);
+  if (!match) return null;
+  const parsed = Number.parseFloat(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed) : null;
+}
+
+export function isTransientCloudError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\[(500|502|503|504)\s*\]|high demand|overloaded|temporarily unavailable/i.test(
+    message,
+  );
+}
+
+/**
+ * Evenly samples 5 proportional spans (start through end) when a full lecture
+ * exceeds `maxChars`, so Cloud Quiz covers the entire video without exceeding limits.
+ */
+export function sampleFullLectureForWindow(
+  content: string,
+  maxChars = FULL_LECTURE_CHAR_LIMIT,
+): string {
+  const cleaned = content.trim();
+  if (cleaned.length <= maxChars) return cleaned;
+  if (maxChars < 200) return cleaned.slice(0, maxChars);
+
+  const lines = cleaned.split('\n').filter((line) => line.trim().length > 0);
+  if (lines.length < 10) {
+    const spanCount = 5;
+    const separator = '\n...\n';
+    const budgetPerSpan = Math.floor(
+      (maxChars - separator.length * (spanCount - 1)) / spanCount,
+    );
+    const step = Math.floor(
+      (cleaned.length - budgetPerSpan) / Math.max(1, spanCount - 1),
+    );
+    const parts = Array.from({ length: spanCount }, (_, idx) => {
+      const start = Math.min(idx * step, Math.max(0, cleaned.length - budgetPerSpan));
+      return cleaned.slice(start, start + budgetPerSpan).trim();
+    });
+    return parts.join(separator).slice(0, maxChars);
+  }
+
+  const spanCount = 5;
+  const separator = '\n...\n';
+  const budgetPerSpan = Math.floor(
+    (maxChars - separator.length * (spanCount - 1)) / spanCount,
+  );
+  const spans: string[] = [];
+
+  for (let s = 0; s < spanCount; s++) {
+    const startLineIdx = Math.floor((s * (lines.length - 1)) / (spanCount - 1));
+    const anchor = s === spanCount - 1
+      ? Math.max(0, lines.length - 1)
+      : startLineIdx;
+
+    const collected: string[] = [];
+    let charSum = 0;
+
+    if (s === spanCount - 1) {
+      for (let i = anchor; i >= 0; i--) {
+        const line = lines[i];
+        if (charSum + line.length + 1 > budgetPerSpan && collected.length > 0) {
+          break;
+        }
+        collected.unshift(line);
+        charSum += line.length + 1;
+      }
+    } else {
+      for (let i = anchor; i < lines.length; i++) {
+        const line = lines[i];
+        if (charSum + line.length + 1 > budgetPerSpan && collected.length > 0) {
+          break;
+        }
+        collected.push(line);
+        charSum += line.length + 1;
+      }
+    }
+
+    spans.push(collected.join('\n'));
+  }
+
+  return spans.join(separator).slice(0, maxChars);
 }
 
 async function runHybridTask<T>(
@@ -531,6 +620,16 @@ async function runHybridTask<T>(
     } catch (error) {
       if (params.mode === InferenceMode.ONLY_ON_DEVICE) {
         throw buildOnDeviceRecoveryError(error);
+      }
+
+      if (isRateLimitError(error)) {
+        const retrySecs = extractRetryDelaySeconds(error);
+        const waitText = retrySecs ? `~${retrySecs}s` : 'about 30s';
+        throw new HybridAiError(
+          'RATE_LIMITED',
+          `Cloud free-tier rate limit reached during ${task}. Please wait ${waitText} and try again.`,
+          'Firebase Spark free tier allows 5 cloud requests/minute. Once Gemini Nano finishes downloading in Chrome, Notes and Flashcards run 100% locally with zero rate limits.',
+        );
       }
 
       const transient = isTransientCloudError(error);
@@ -688,7 +787,7 @@ export async function generatePracticeQuiz(
   content: string,
   deps?: HybridInferenceDeps,
 ): Promise<HybridCallResult<QuizData>> {
-  const prepared = trimForWindow(content, FULL_LECTURE_CHAR_LIMIT);
+  const prepared = sampleFullLectureForWindow(content, FULL_LECTURE_CHAR_LIMIT);
   if (!prepared) {
     throw new HybridAiError(
       'EMPTY_CONTENT',

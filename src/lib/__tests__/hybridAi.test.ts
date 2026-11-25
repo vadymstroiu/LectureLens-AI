@@ -21,6 +21,7 @@ import {
   ON_DEVICE_CHAR_LIMIT,
   parseStructuredJson,
   resolveLocalFirstMode,
+  sampleFullLectureForWindow,
 } from '../hybridAi';
 import {
   extractCaptionTrackUrlFromHtml,
@@ -209,6 +210,48 @@ describe('Hybrid AI routing & model configuration', () => {
     expect(generateContent).toHaveBeenCalledTimes(2);
     expect(sleepSpy).toHaveBeenCalledWith(800);
     expect(result.data.cards).toHaveLength(1);
+  });
+
+  it('does not burn retries on 429 rate-limit errors and surfaces parsed cooldown time', async () => {
+    const generateContent = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          '[429 ] Quota exceeded for metric: free_tier_requests. Please retry in 25.49s.',
+        ),
+      );
+    const sleepSpy = vi.fn();
+
+    await expect(
+      extractStudyNotes('[00:00] Rate limit test', 'hybrid', {
+        ai: MOCK_AI,
+        sleep: sleepSpy,
+        modelFactory: () => ({ generateContent }),
+      }),
+    ).rejects.toMatchObject({
+      name: 'HybridAiError',
+      code: 'RATE_LIMITED',
+      message: expect.stringContaining('~26s'),
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(sleepSpy).not.toHaveBeenCalled();
+  });
+
+  it('evenly samples ultra-long lectures across start, middle, and end within maxChars', () => {
+    const shortText = '[00:00] Short lecture';
+    expect(sampleFullLectureForWindow(shortText, 500)).toBe(shortText);
+
+    const longLines = Array.from(
+      { length: 200 },
+      (_, idx) => `[${formatTimestamp(idx * 30)}] Segment number ${idx} explaining architecture details.`,
+    ).join('\n');
+
+    const sampled = sampleFullLectureForWindow(longLines, 1500);
+    expect(sampled.length).toBeLessThanOrEqual(1500);
+    expect(sampled).toContain('Segment number 0');
+    expect(sampled).toContain('Segment number 199');
+    expect(sampled).toContain('...');
   });
 
   it('enforces Strict Local-Only policy and surfaces actionable Nano recovery hint on failure', async () => {
