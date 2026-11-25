@@ -7,12 +7,14 @@ import {
   ChevronUp,
   ClipboardCopy,
   Download,
+  ExternalLink,
   FileText,
   FolderOpen,
   HardDrive,
   HelpCircle,
   Layers,
   Moon,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Sun,
@@ -233,6 +235,37 @@ export default function App() {
       setDownloadingNano(false);
       setDownloadProgress(null);
     }
+  };
+
+  const openChromePage = (url: string) => {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      void chrome.tabs.create({ url });
+      return;
+    }
+    void navigator.clipboard?.writeText(url);
+    setStatusBanner(`Copied ${url} — paste it into Chrome's address bar.`);
+  };
+
+  const handleRecheckOrDownloadNano = async () => {
+    const status = await checkOnDeviceAvailability();
+    setOnDeviceStatus(status);
+    if (status === 'available') {
+      setErrorState(null);
+      setStatusBanner('Gemini Nano is ready! You can run Local-Only now.');
+      return;
+    }
+    if (status === 'downloadable') {
+      setErrorState(null);
+      await handleDownloadNano();
+      return;
+    }
+    if (status === 'downloading') {
+      setStatusBanner('Gemini Nano is currently downloading in Chrome.');
+      return;
+    }
+    setStatusBanner(
+      'Enable both Chrome flags below, click Relaunch in Chrome, then click Check / Download Nano.',
+    );
   };
 
   const handleFirstClickPrewarm = () => {
@@ -937,7 +970,7 @@ export default function App() {
         </div>
 
         {/* Live Telemetry & Inference Source Row */}
-        <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5">
           <InferenceBadge
             telemetry={session?.lastTelemetry}
             history={session?.telemetryHistory ?? []}
@@ -946,8 +979,8 @@ export default function App() {
             downloadProgress={downloadProgress}
             isOnline={isOnline}
           />
-          <div className="flex items-center gap-2">
-            {savedSessions.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            {savedSessions.length > 0 ? (
               <button
                 type="button"
                 onClick={() => setLibraryOpen((prev) => !prev)}
@@ -957,12 +990,13 @@ export default function App() {
                 <FolderOpen className="h-2.5 w-2.5 text-indigo-500" />
                 Library ({savedSessions.length})
               </button>
-            )}
-            {session && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
-                <HardDrive className="h-2.5 w-2.5" />
-                Saved
-              </span>
+            ) : (
+              session && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
+                  <HardDrive className="h-2.5 w-2.5" />
+                  Saved
+                </span>
+              )
             )}
           </div>
         </div>
@@ -1285,13 +1319,54 @@ export default function App() {
               </div>
             </div>
             {errorState.code === 'ON_DEVICE_UNAVAILABLE' && (
-              <button
-                type="button"
-                onClick={() => updatePolicy('hybrid')}
-                className="mt-1 inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-rose-500"
-              >
-                Switch to Hybrid (Auto Cloud Fallback)
-              </button>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => updatePolicy('hybrid')}
+                  className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-rose-500"
+                >
+                  <Zap className="h-3 w-3" />
+                  Switch to Hybrid (Auto Cloud Fallback)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRecheckOrDownloadNano()}
+                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-500"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Check / Download Nano
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openChromePage(
+                      'chrome://flags/#optimization-guide-on-device-model',
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-white/80 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-white dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-slate-800"
+                >
+                  <ExternalLink className="h-2.5 w-2.5" />
+                  1. Model Flag
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openChromePage('chrome://flags/#prompt-api-for-gemini-nano')
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-white/80 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-white dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-slate-800"
+                >
+                  <ExternalLink className="h-2.5 w-2.5" />
+                  2. Prompt API Flag
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openChromePage('chrome://components')}
+                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-white/80 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-white dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-slate-800"
+                >
+                  <ExternalLink className="h-2.5 w-2.5" />
+                  3. Components
+                </button>
+              </div>
             )}
           </div>
         )}
