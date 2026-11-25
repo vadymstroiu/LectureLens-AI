@@ -20,7 +20,7 @@ const SAMPLE_SEGMENTS = [
   {
     startSeconds: 158,
     timestamp: '02:38',
-    text: 'However, small local models have a tighter context window. When analyzing an hour-long lecture transcript, cloud synthesis with Gemini 2.5 Flash provides deep cross-chapter reasoning.',
+    text: 'However, small local models have a tighter context window. When analyzing an hour-long lecture transcript, cloud synthesis with Gemini 3.8 Flash provides deep cross-chapter reasoning.',
   },
   {
     startSeconds: 224,

@@ -74,10 +74,10 @@ describe('Hybrid AI routing & model configuration', () => {
     expect(cardsLocal.inCloudParams?.model).toBe(CLOUD_MODEL_NAME);
   });
 
-  it('routes Practice Quiz strictly to ONLY_IN_CLOUD with gemini-2.5-flash and JSON schema', () => {
+  it('routes Practice Quiz strictly to ONLY_IN_CLOUD with gemini-3.8-flash and JSON schema', () => {
     const quizParams = buildQuizModelParams();
     expect(quizParams.mode).toBe(InferenceMode.ONLY_IN_CLOUD);
-    expect(quizParams.inCloudParams?.model).toBe('gemini-2.5-flash');
+    expect(quizParams.inCloudParams?.model).toBe(CLOUD_MODEL_NAME);
     expect(quizParams.inCloudParams?.generationConfig?.responseMimeType).toBe(
       'application/json',
     );
@@ -129,7 +129,7 @@ describe('Hybrid AI routing & model configuration', () => {
     });
 
     expect(capturedParams?.mode).toBe(InferenceMode.PREFER_ON_DEVICE);
-    expect(capturedParams?.inCloudParams?.model).toBe('gemini-2.5-flash');
+    expect(capturedParams?.inCloudParams?.model).toBe(CLOUD_MODEL_NAME);
     expect(result.telemetry.source).toBe('ON_DEVICE');
     expect(result.telemetry.modelLabel).toBe('Gemini Nano');
     expect(result.telemetry.latencyMs).toBe(380);
@@ -168,7 +168,7 @@ describe('Hybrid AI routing & model configuration', () => {
     });
 
     expect(result.telemetry.source).toBe('IN_CLOUD');
-    expect(result.telemetry.modelLabel).toBe('gemini-2.5-flash');
+    expect(result.telemetry.modelLabel).toBe(CLOUD_MODEL_NAME);
     expect(result.telemetry.latencyMs).toBe(1620);
     expect(formatLatency(result.telemetry.latencyMs)).toBe('1.6s');
     expect(result.data.cards[0].id).toBe('c1');

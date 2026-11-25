@@ -30,7 +30,9 @@ import { getFirebaseAI, isFirebaseConfigured } from './firebase';
 
 export const ON_DEVICE_CHAR_LIMIT = 6000;
 export const FULL_LECTURE_CHAR_LIMIT = 60000;
-export const CLOUD_MODEL_NAME = 'gemini-2.5-flash';
+export const CLOUD_MODEL_NAME =
+  (import.meta.env.VITE_FIREBASE_CLOUD_MODEL ?? '').trim() ||
+  'gemini-3.8-flash';
 
 export type HybridAiErrorCode =
   | 'ON_DEVICE_UNAVAILABLE'
@@ -480,7 +482,7 @@ function buildOnDeviceRecoveryError(rawError: unknown): HybridAiError {
   return new HybridAiError(
     'ON_DEVICE_UNAVAILABLE',
     `Strict Local-Only mode requires Gemini Nano, which is not ready in Chrome (${detail}).`,
-    'Enable chrome://flags/#optimization-guide-on-device-model and chrome://flags/#prompt-api-for-gemini-nano, verify download at chrome://on-device-internals, or switch to Hybrid (Auto) for seamless Cloud Gemini 2.5 Flash fallback.',
+    'Enable chrome://flags/#optimization-guide-on-device-model and chrome://flags/#prompt-api-for-gemini-nano, verify download at chrome://on-device-internals, or switch to Hybrid (Auto) for seamless Cloud Gemini 3.8 Flash fallback.',
   );
 }
 

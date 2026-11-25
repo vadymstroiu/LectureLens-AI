@@ -2,16 +2,16 @@
 
 **LectureLens AI** is a Manifest V3 Chrome Extension that transforms YouTube lectures and web articles into **timestamped study notes**, **active-recall flashcards**, and **full-lecture practice quizzes** using **Firebase AI Logic Hybrid Inference** (`firebase` v12.5.0+).
 
-It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, private chapter extraction (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE`) and seamlessly delegates or falls back to **Cloud Gemini 2.5 Flash** (`inCloudParams` / `ONLY_IN_CLOUD`) for full-lecture reasoning.
+It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, private chapter extraction (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE`) and seamlessly delegates or falls back to **Cloud Gemini 3.8 Flash** (`inCloudParams` / `ONLY_IN_CLOUD`) for full-lecture reasoning.
 
 ---
 
 ## Key Features
 
 - **Explicit Hybrid Routing (`src/lib/hybridAi.ts`)**:
-  - **On-Device First (`InferenceMode.PREFER_ON_DEVICE`)**: Study Notes, Key Definitions, and Active-Recall Flashcards on segments up to `6,000` characters, with explicit `inCloudParams: { model: "gemini-2.5-flash" }` fallback.
+  - **On-Device First (`InferenceMode.PREFER_ON_DEVICE`)**: Study Notes, Key Definitions, and Active-Recall Flashcards on segments up to `6,000` characters, with explicit `inCloudParams: { model: "gemini-3.8-flash" }` fallback.
   - **Strict Local-Only Privacy Toggle**: Switches notes & flashcards to `InferenceMode.ONLY_ON_DEVICE` with zero cloud egress and clear Chrome flag recovery guidance if Gemini Nano is not yet downloaded.
-  - **Cloud Synthesis (`InferenceMode.ONLY_IN_CLOUD`)**: Generates a 5-question multiple-choice practice quiz across full-length transcripts (`gemini-2.5-flash`).
+  - **Cloud Synthesis (`InferenceMode.ONLY_IN_CLOUD`)**: Generates a 5-question multiple-choice practice quiz across full-length transcripts (`gemini-3.8-flash`).
 - **Guaranteed Structured JSON (`Schema`)**: Every `generateContent` call enforces `responseMimeType: "application/json"` and `responseSchema` (plus `onDeviceParams.promptOptions.responseConstraint` for Gemini Nano).
 - **Live Telemetry & Inference Verification**: Inspects `result.response.inferenceSource` and `performance.now()` latency on every call, displaying a live header badge (`⚡ On-Device (Gemini Nano) • 380ms` or `☁️ Cloud (Gemini) • 1.6s`) and call log.
 - **One-Click YouTube Transcript Capture & Video Seeking**: Captures timestamped captions directly from `youtube.com` and lets you click any `[mm:ss]` chip in Notes, Flashcards, or Quiz explanations to jump straight to that moment in the video.
@@ -42,7 +42,7 @@ flowchart TB
 
     subgraph ENGINES["Firebase AI Logic Hybrid Inference"]
         NANO["On-Device: Gemini Nano<br/>(Chrome Built-in Prompt API)"]
-        CLOUD["Cloud: Gemini 2.5 Flash<br/>(GoogleAIBackend)"]
+        CLOUD["Cloud: Gemini 3.8 Flash<br/>(GoogleAIBackend)"]
     end
 
     TAB <-->|"CAPTURE_TRANSCRIPT / SEEK_VIDEO"| SP
@@ -121,7 +121,7 @@ npm run build
    - On the **Notes** tab, click **Extract Key Notes & Terms** (`PREFER_ON_DEVICE`). Click any `[mm:ss]` timestamp chip to seek the YouTube player directly.
    - On the **Flashcards** tab, click **Create Active-Recall Cards**, flip cards to test recall, and mark cards as **Mastered**.
 3. **Test Strict Local-Only Mode**: Toggle **Local-Only** in the header to enforce `InferenceMode.ONLY_ON_DEVICE` and verify offline privacy (with zero cloud calls).
-4. **Generate Full-Lecture Quiz (Cloud)**: Switch to the **Quiz** tab and click **Generate Full-Lecture Quiz (Cloud)** (`ONLY_IN_CLOUD` using `gemini-2.5-flash`) for 5 cross-chapter MCQs with instant explanations and timestamp jumps.
+4. **Generate Full-Lecture Quiz (Cloud)**: Switch to the **Quiz** tab and click **Generate Full-Lecture Quiz (Cloud)** (`ONLY_IN_CLOUD` using `gemini-3.8-flash`) for 5 cross-chapter MCQs with instant explanations and timestamp jumps.
 5. **Export & Offline Restore**: Use **Copy Markdown** or **Export Anki CSV** in the bottom bar. Closing and reopening the Side Panel automatically restores your latest session from `chrome.storage.local`.
 
 ---

@@ -51,7 +51,7 @@ export function NotesTab({
           </p>
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             Runs with <code className="font-mono">PREFER_ON_DEVICE</code> (Gemini Nano) with
-            automatic Gemini 2.5 Flash fallback when needed.
+            automatic Gemini 3.8 Flash fallback when needed.
           </p>
         </div>
       )}

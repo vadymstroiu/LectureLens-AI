@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LectureLens AI",
-  "description": "Hybrid On-Device (Gemini Nano) + Cloud (Gemini 2.5 Flash) YouTube & article study companion powered by Firebase AI Logic.",
+  "description": "Hybrid On-Device (Gemini Nano) + Cloud (Gemini 3.8 Flash) YouTube & article study companion powered by Firebase AI Logic.",
   "version": "1.0.0",
   "permissions": [
     "sidePanel",

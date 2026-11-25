@@ -46,7 +46,7 @@ export function QuizTab({
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div>
             <span className="font-semibold">Local-Only Privacy Mode is active.</span>{' '}
-            The Full-Lecture Quiz explicitly uses Cloud Gemini 2.5 Flash (
+            The Full-Lecture Quiz explicitly uses Cloud Gemini 3.8 Flash (
             <code className="font-mono">ONLY_IN_CLOUD</code>) to reason across the entire
             transcript. Clicking below sends the lecture to Firebase AI Logic Cloud.
           </div>
@@ -80,7 +80,7 @@ export function QuizTab({
           </p>
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             Uses <code className="font-mono">ONLY_IN_CLOUD</code> with{' '}
-            <code className="font-mono">gemini-2.5-flash</code> to test cross-chapter
+            <code className="font-mono">gemini-3.8-flash</code> to test cross-chapter
             comprehension across long transcripts.
           </p>
         </div>

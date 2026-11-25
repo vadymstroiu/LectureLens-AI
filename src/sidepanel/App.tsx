@@ -734,7 +734,7 @@ export default function App() {
                     ? 'bg-white text-indigo-600 shadow-xs dark:bg-slate-800 dark:text-indigo-300'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
-                title="Prefer Gemini Nano on-device with automatic Cloud Gemini 2.5 Flash fallback"
+                title="Prefer Gemini Nano on-device with automatic Cloud Gemini 3.8 Flash fallback"
               >
                 <Zap className="h-2.5 w-2.5" />
                 Hybrid
@@ -795,7 +795,7 @@ export default function App() {
             <div>
               <span className="font-semibold">Firebase config pending:</span> Copy{' '}
               <code className="font-mono">.env.example</code> to{' '}
-              <code className="font-mono">.env</code> and rebuild for Cloud Gemini 2.5
+              <code className="font-mono">.env</code> and rebuild for Cloud Gemini 3.8
               Flash fallback &amp; Quiz synthesis.
             </div>
             <button
@@ -957,7 +957,7 @@ export default function App() {
                 First-time on-device setup downloads ~1.7 GB in the background. In{' '}
                 <strong>Local-Only</strong> mode this waits until download completes,
                 or you can switch to <strong>Hybrid</strong> for instant Cloud Gemini
-                2.5 Flash while Nano finishes.
+                3.8 Flash while Nano finishes.
               </p>
               <button
                 type="button"
