@@ -18,7 +18,11 @@ import {
   Youtube,
   Zap,
 } from 'lucide-react';
-import { formatSegmentsAsTranscript } from '../content/youtubeTranscriptParser';
+import {
+  formatSegmentsAsTranscript,
+  mergeCaptionSegments,
+  parseTranscriptDomRow,
+} from '../content/youtubeTranscriptParser';
 import { isFirebaseConfigured } from '../lib/firebase';
 import {
   analyzeContentWindow,
@@ -98,6 +102,7 @@ export default function App() {
 
   const [capturing, setCapturing] = useState(false);
   const [loadingTask, setLoadingTask] = useState<ActiveTab | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [errorState, setErrorState] = useState<{
     message: string;
     hint?: string;
@@ -140,6 +145,24 @@ export default function App() {
       root.classList.remove('dark');
     }
   }, [theme]);
+
+  // Poll Gemini Nano readiness while downloading
+  useEffect(() => {
+    if (
+      onDeviceStatus !== 'downloading' &&
+      onDeviceStatus !== 'downloadable'
+    ) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void checkOnDeviceAvailability().then((next) => {
+        setOnDeviceStatus(next);
+      });
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [onDeviceStatus]);
 
   const persistSession = useCallback((nextSession: LectureSession) => {
     setSession(nextSession);
@@ -224,19 +247,153 @@ export default function App() {
       try {
         response = await sendCapture(tab.id);
       } catch {
-        // Tab may have been open before extension reload: try injecting built content script
-        const scriptFiles =
-          chrome.runtime.getManifest().content_scripts?.[0]?.js ?? [];
-        if (scriptFiles.length > 0 && tab.url?.includes('youtube.com')) {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: scriptFiles,
-          });
-          response = await sendCapture(tab.id);
-        } else {
+        // Fallback for tabs open before extension reload: run self-contained DOM extractor
+        if (!tab.url?.includes('youtube.com')) {
           throw new Error(
             'Navigate to a youtube.com/watch?v=... tab or use Paste / Selected Text below.',
           );
+        }
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: async () => {
+            const url = window.location.href;
+            const parsedUrl = new URL(url);
+            const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+            const videoId =
+              parsedUrl.searchParams.get('v') ||
+              (['shorts', 'live', 'embed'].includes(pathParts[0])
+                ? pathParts[1]
+                : '');
+            if (!videoId) {
+              return {
+                ok: false as const,
+                error:
+                  'Open a YouTube video watch page (youtube.com/watch?v=...) to capture a transcript.',
+              };
+            }
+
+            const title =
+              document
+                .querySelector<HTMLElement>(
+                  'h1.ytd-watch-metadata yt-formatted-string, h1.title yt-formatted-string',
+                )
+                ?.textContent?.trim() ||
+              document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim() ||
+              'YouTube Lecture';
+
+            const readDomRows = () => {
+              const rows: Array<{ timestampText: string; bodyText: string }> = [];
+              document
+                .querySelectorAll('transcript-segment-view-model')
+                .forEach((node) => {
+                  const timeEl = node.querySelector(
+                    '.ytwTranscriptSegmentViewModelTimestamp, [class*="timestamp" i], [class*="Timestamp"]',
+                  );
+                  const textEl = node.querySelector(
+                    '.ytwTranscriptSegmentViewModelText, yt-formatted-string, [class*="text" i], [class*="Text"]',
+                  );
+                  const timestampText = timeEl?.textContent?.trim() ?? '';
+                  const bodyText =
+                    textEl && textEl !== timeEl
+                      ? textEl.textContent ?? ''
+                      : node.textContent ?? '';
+                  if (bodyText.trim()) {
+                    rows.push({ timestampText, bodyText });
+                  }
+                });
+
+              if (rows.length > 0) return rows;
+
+              document
+                .querySelectorAll('ytd-transcript-segment-renderer')
+                .forEach((node) => {
+                  const timestampText =
+                    node.querySelector('.segment-timestamp')?.textContent?.trim() ??
+                    '';
+                  const bodyText =
+                    node.querySelector('.segment-text')?.textContent ?? '';
+                  if (bodyText.trim()) {
+                    rows.push({ timestampText, bodyText });
+                  }
+                });
+
+              return rows;
+            };
+
+            let rows = readDomRows();
+            if (rows.length === 0) {
+              const findTranscriptBtn = () =>
+                document.querySelector<HTMLElement>(
+                  'ytd-video-description-transcript-section-renderer button, button[aria-label*="transcript" i]',
+                ) ??
+                Array.from(document.querySelectorAll<HTMLElement>('button')).find(
+                  (btn) =>
+                    /show\s+transcript/i.test(btn.textContent ?? '') ||
+                    /transcript/i.test(btn.getAttribute('aria-label') ?? ''),
+                ) ??
+                null;
+
+              let transcriptBtn = findTranscriptBtn();
+              if (!transcriptBtn) {
+                const expandBtn = document.querySelector<HTMLElement>(
+                  'tp-yt-paper-button#expand, #description-inline-expander #expand, #expand',
+                );
+                if (expandBtn) {
+                  expandBtn.click();
+                  await new Promise((r) => setTimeout(r, 300));
+                  transcriptBtn = findTranscriptBtn();
+                }
+              }
+
+              if (transcriptBtn) {
+                transcriptBtn.click();
+                const deadline = Date.now() + 4500;
+                while (Date.now() < deadline) {
+                  await new Promise((r) => setTimeout(r, 150));
+                  rows = readDomRows();
+                  if (rows.length > 0) break;
+                }
+              }
+            }
+
+            return {
+              ok: true as const,
+              videoId,
+              title,
+              url,
+              rows,
+            };
+          },
+        });
+
+        const payload = results[0]?.result;
+        if (!payload || !payload.ok) {
+          response = {
+            ok: false,
+            error:
+              payload?.error ||
+              'Could not extract transcript from this YouTube tab.',
+          };
+        } else {
+          const parsedRows = payload.rows
+            .map((r) => parseTranscriptDomRow(r.timestampText, r.bodyText))
+            .filter((seg): seg is NonNullable<typeof seg> => seg !== null);
+          const segments = mergeCaptionSegments(parsedRows);
+          response =
+            segments.length > 0
+              ? {
+                  ok: true,
+                  videoId: payload.videoId,
+                  title: payload.title,
+                  url: payload.url,
+                  segments,
+                }
+              : {
+                  ok: false,
+                  error:
+                    'No transcript segments were found. Scroll down on YouTube, click "Show transcript", and try again—or paste text below.',
+                };
         }
       }
 
@@ -347,13 +504,32 @@ export default function App() {
       const tab = await getActiveTab();
       if (!tab?.id) return;
 
-      const res = (await chrome.tabs.sendMessage(tab.id, {
-        type: 'SEEK_VIDEO',
-        startSeconds,
-      })) as SeekVideoResponse;
+      try {
+        const res = (await chrome.tabs.sendMessage(tab.id, {
+          type: 'SEEK_VIDEO',
+          startSeconds,
+        })) as SeekVideoResponse;
 
-      if (!res.ok) {
-        setStatusBanner(res.error);
+        if (!res.ok) {
+          setStatusBanner(res.error);
+        }
+        return;
+      } catch {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (sec: number) => {
+            const video = document.querySelector<HTMLVideoElement>('video');
+            if (!video) return false;
+            video.currentTime = Math.max(0, sec);
+            void video.play().catch(() => undefined);
+            return true;
+          },
+          args: [startSeconds],
+        });
+
+        if (!results[0]?.result) {
+          setStatusBanner('No active YouTube video player found on this tab.');
+        }
       }
     } catch {
       setStatusBanner(
@@ -387,12 +563,22 @@ export default function App() {
   const handleGenerateNotes = async () => {
     if (!session) return;
     setErrorState(null);
+    setDownloadProgress(null);
     setLoadingTask('notes');
     try {
       const { data, telemetry } = await extractStudyNotes(
         localWindowText,
         policy,
+        {
+          onDownloadProgress: (pct) => {
+            setDownloadProgress(pct);
+            setOnDeviceStatus('downloading');
+          },
+        },
       );
+      if (telemetry.source === 'ON_DEVICE') {
+        setOnDeviceStatus('available');
+      }
       persistSession({
         ...session,
         notes: data,
@@ -403,18 +589,29 @@ export default function App() {
       handleAiError(error);
     } finally {
       setLoadingTask(null);
+      setDownloadProgress(null);
     }
   };
 
   const handleGenerateFlashcards = async () => {
     if (!session) return;
     setErrorState(null);
+    setDownloadProgress(null);
     setLoadingTask('flashcards');
     try {
       const { data, telemetry } = await generateFlashcards(
         localWindowText,
         policy,
+        {
+          onDownloadProgress: (pct) => {
+            setDownloadProgress(pct);
+            setOnDeviceStatus('downloading');
+          },
+        },
       );
+      if (telemetry.source === 'ON_DEVICE') {
+        setOnDeviceStatus('available');
+      }
       persistSession({
         ...session,
         flashcards: data,
@@ -426,6 +623,7 @@ export default function App() {
       handleAiError(error);
     } finally {
       setLoadingTask(null);
+      setDownloadProgress(null);
     }
   };
 
@@ -579,6 +777,7 @@ export default function App() {
             history={session?.telemetryHistory ?? []}
             onDeviceStatus={onDeviceStatus}
             policy={policy}
+            downloadProgress={downloadProgress}
           />
           {session && (
             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
@@ -744,6 +943,33 @@ export default function App() {
         </section>
 
         {/* Status or Error Alerts */}
+        {loadingTask &&
+          policy === 'local-only' &&
+          onDeviceStatus !== 'available' && (
+            <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-800 dark:text-amber-200">
+              <p className="font-semibold">
+                Chrome is downloading Gemini Nano
+                {typeof downloadProgress === 'number' && downloadProgress > 0
+                  ? ` (${downloadProgress}%)`
+                  : '...'}
+              </p>
+              <p className="leading-relaxed opacity-90">
+                First-time on-device setup downloads ~1.7 GB in the background. In{' '}
+                <strong>Local-Only</strong> mode this waits until download completes,
+                or you can switch to <strong>Hybrid</strong> for instant Cloud Gemini
+                2.5 Flash while Nano finishes.
+              </p>
+              <button
+                type="button"
+                onClick={() => updatePolicy('hybrid')}
+                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500"
+              >
+                <Zap className="h-3 w-3" />
+                Switch to Hybrid (Instant Cloud Fallback)
+              </button>
+            </div>
+          )}
+
         {statusBanner && (
           <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/10 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-200">
             {statusBanner}

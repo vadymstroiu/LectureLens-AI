@@ -266,10 +266,37 @@ export function extractCaptionTrackUrlFromHtml(html: string): string | null {
       tracks.find((t) => t.kind !== 'asr') ??
       tracks[0];
 
-    return preferred?.baseUrl ?? null;
+    const rawUrl = preferred?.baseUrl ?? null;
+    return rawUrl ? rawUrl.replace(/\\u0026/g, '&') : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Normalizes a DOM transcript row (timestamp + body text) into a TranscriptSegment.
+ */
+export function parseTranscriptDomRow(
+  timestampText: string,
+  bodyText: string,
+): TranscriptSegment | null {
+  const cleanedTimestamp = timestampText.trim();
+  let cleanedBody = normalizeCaptionText(bodyText);
+
+  if (cleanedTimestamp && cleanedBody.startsWith(cleanedTimestamp)) {
+    cleanedBody = normalizeCaptionText(
+      cleanedBody.slice(cleanedTimestamp.length),
+    );
+  }
+
+  if (!cleanedBody) return null;
+
+  const startSeconds = parseTimestampToSeconds(cleanedTimestamp);
+  return {
+    startSeconds,
+    timestamp: formatTimestamp(startSeconds),
+    text: cleanedBody,
+  };
 }
 
 /**

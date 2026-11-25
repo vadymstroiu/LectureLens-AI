@@ -71,6 +71,7 @@ export interface HybridInferenceDeps {
   ai?: AI;
   modelFactory?: (ai: AI, params: HybridParams) => Pick<GenerativeModel, 'generateContent'>;
   now?: () => number;
+  onDownloadProgress?: (percent: number) => void;
 }
 
 interface ChromeLanguageModelGlobal {
@@ -379,7 +380,37 @@ export function parseStructuredJson<T>(rawText: string): T {
 
 // --- Model Parameter Builders (Exported for Testability) ---
 
-export function buildNotesModelParams(policy: HybridRoutingPolicy): HybridParams {
+function buildOnDeviceCreateOptions(
+  onDownloadProgress?: (percent: number) => void,
+) {
+  return {
+    expectedInputs: [{ type: 'text' as const, languages: ['en'] }],
+    expectedOutputs: [{ type: 'text' as const, languages: ['en'] }],
+    ...(onDownloadProgress
+      ? {
+          monitor: (m: {
+            addEventListener: (
+              eventType: 'downloadprogress',
+              listener: (e: { loaded: number }) => void,
+            ) => void;
+          }) => {
+            m.addEventListener('downloadprogress', (e) => {
+              const pct = Math.min(
+                100,
+                Math.max(0, Math.round((e.loaded ?? 0) * 100)),
+              );
+              onDownloadProgress(pct);
+            });
+          },
+        }
+      : {}),
+  };
+}
+
+export function buildNotesModelParams(
+  policy: HybridRoutingPolicy,
+  onDownloadProgress?: (percent: number) => void,
+): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
     inCloudParams: {
@@ -391,10 +422,7 @@ export function buildNotesModelParams(policy: HybridRoutingPolicy): HybridParams
       },
     },
     onDeviceParams: {
-      createOptions: {
-        expectedInputs: [{ type: 'text', languages: ['en'] }],
-        expectedOutputs: [{ type: 'text', languages: ['en'] }],
-      },
+      createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
       promptOptions: {
         responseConstraint: STUDY_NOTES_JSON_CONSTRAINT,
       },
@@ -404,6 +432,7 @@ export function buildNotesModelParams(policy: HybridRoutingPolicy): HybridParams
 
 export function buildFlashcardsModelParams(
   policy: HybridRoutingPolicy,
+  onDownloadProgress?: (percent: number) => void,
 ): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
@@ -416,10 +445,7 @@ export function buildFlashcardsModelParams(
       },
     },
     onDeviceParams: {
-      createOptions: {
-        expectedInputs: [{ type: 'text', languages: ['en'] }],
-        expectedOutputs: [{ type: 'text', languages: ['en'] }],
-      },
+      createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
       promptOptions: {
         responseConstraint: FLASHCARDS_JSON_CONSTRAINT,
       },
@@ -561,7 +587,7 @@ export async function extractStudyNotes(
 
   const { parsed, telemetry } = await runHybridTask<StudyNotesData>(
     'notes',
-    buildNotesModelParams(policy),
+    buildNotesModelParams(policy, deps?.onDownloadProgress),
     prompt,
     deps,
   );
@@ -608,7 +634,7 @@ export async function generateFlashcards(
 
   const { parsed, telemetry } = await runHybridTask<FlashcardsData>(
     'flashcards',
-    buildFlashcardsModelParams(policy),
+    buildFlashcardsModelParams(policy, deps?.onDownloadProgress),
     prompt,
     deps,
   );

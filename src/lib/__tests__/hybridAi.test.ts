@@ -27,6 +27,7 @@ import {
   extractVideoId,
   formatTimestamp,
   parseJson3Captions,
+  parseTranscriptDomRow,
   parseXmlCaptions,
 } from '../../content/youtubeTranscriptParser';
 import {
@@ -369,9 +370,36 @@ describe('YouTube transcript & URL parsers', () => {
     ]);
 
     const html =
-      'var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{"baseUrl":"https://example.com/asr","languageCode":"en","kind":"asr"},{"baseUrl":"https://example.com/manual","languageCode":"en"}]}}};';
+      'var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{"baseUrl":"https://example.com/asr","languageCode":"en","kind":"asr"},{"baseUrl":"https://example.com/manual?v=1\\u0026lang=en","languageCode":"en"}]}}};';
     expect(extractCaptionTrackUrlFromHtml(html)).toBe(
-      'https://example.com/manual',
+      'https://example.com/manual?v=1&lang=en',
     );
+  });
+
+  it('parses modern DOM transcript rows and strips duplicate timestamp prefix', () => {
+    expect(parseTranscriptDomRow('01:25', '01:25 Welcome to Lecture 4')).toEqual({
+      startSeconds: 85,
+      timestamp: '01:25',
+      text: 'Welcome to Lecture 4',
+    });
+    expect(parseTranscriptDomRow('00:10', '   ')).toBeNull();
+  });
+
+  it('wires onDownloadProgress monitor callback into onDeviceParams.createOptions', () => {
+    const progressSpy = vi.fn();
+    const params = buildNotesModelParams('local-only', progressSpy);
+    const monitor = params.onDeviceParams?.createOptions?.monitor;
+    expect(monitor).toBeTypeOf('function');
+
+    let capturedHandler: ((e: { loaded: number }) => void) | undefined;
+    monitor?.({
+      addEventListener: (_eventType, listener) => {
+        capturedHandler = listener;
+      },
+      removeEventListener: vi.fn(),
+    });
+
+    capturedHandler?.({ loaded: 0.42 });
+    expect(progressSpy).toHaveBeenCalledWith(42);
   });
 });
