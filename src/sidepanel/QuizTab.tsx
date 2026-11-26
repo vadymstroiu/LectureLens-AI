@@ -1,0 +1,306 @@
+import {
+  CheckCircle2,
+  Clock,
+  Cloud,
+  HelpCircle,
+  Lightbulb,
+  Loader2,
+  Lock,
+  RotateCcw,
+  XCircle,
+} from 'lucide-react';
+import type {
+  HybridRoutingPolicy,
+  QuizData,
+  SimpleExplanation,
+} from '../types/lecture';
+
+interface QuizTabProps {
+  quiz?: QuizData;
+  answers: Record<string, number>;
+  isYouTubeSource?: boolean;
+  hasContent: boolean;
+  isLoading: boolean;
+  policy: HybridRoutingPolicy;
+  explanations?: Record<string, SimpleExplanation>;
+  explainingKey?: string | null;
+  activeChapterLabel?: string;
+  totalQuestionsCount?: number;
+  onGenerate: () => void;
+  onSelectAnswer: (questionId: string, optionIndex: number) => void;
+  onResetQuiz: () => void;
+  onSeekVideo: (startSeconds: number) => void;
+  onExplainConcept?: (key: string, concept: string, context: string) => void;
+}
+
+export function QuizTab({
+  quiz,
+  answers,
+  isYouTubeSource = false,
+  hasContent,
+  isLoading,
+  policy,
+  explanations = {},
+  explainingKey,
+  activeChapterLabel,
+  totalQuestionsCount,
+  onGenerate,
+  onSelectAnswer,
+  onResetQuiz,
+  onSeekVideo,
+  onExplainConcept,
+}: QuizTabProps) {
+  const questions = quiz?.questions ?? [];
+  const answeredCount = questions.filter((q) => answers[q.id] !== undefined).length;
+  const correctCount = questions.filter(
+    (q) => answers[q.id] === q.correctIndex,
+  ).length;
+
+  return (
+    <div className="space-y-4">
+      {policy === 'local-only' && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-800 dark:text-amber-200">
+          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <div>
+            <span className="font-semibold">Local-Only Privacy Mode is active.</span>{' '}
+            The Full-Lecture Quiz explicitly uses Cloud Gemini 3.8 Flash (
+            <code className="font-mono">ONLY_IN_CLOUD</code>) to reason across the entire
+            transcript. Clicking below sends the lecture to Firebase AI Logic Cloud.
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+        <button
+          type="button"
+          disabled={!hasContent || isLoading}
+          onClick={onGenerate}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50 sm:w-auto sm:min-w-[240px]"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>Synthesizing Full-Lecture Quiz (Cloud)...</span>
+            </>
+          ) : (
+            <>
+              <Cloud className="h-4 w-4" aria-hidden="true" />
+              <span>
+                {questions.length > 0
+                  ? 'Regenerate Full-Lecture Quiz (Cloud)'
+                  : 'Generate Full-Lecture Quiz (Cloud)'}
+              </span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {activeChapterLabel &&
+        totalQuestionsCount !== undefined &&
+        totalQuestionsCount > 0 && (
+          <div className="rounded-lg bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-indigo-800 dark:text-indigo-200">
+            Filtered: <strong>{activeChapterLabel}</strong> ({questions.length} of{' '}
+            {totalQuestionsCount} questions)
+          </div>
+        )}
+
+      {!questions.length && !isLoading && (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-5 text-center dark:border-slate-700 dark:bg-slate-900/40">
+          <HelpCircle className="mx-auto mb-2 h-6 w-6 text-indigo-500" aria-hidden="true" />
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+            Full-Lecture Practice Quiz (5–12 Questions)
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            Uses <code className="font-mono">ONLY_IN_CLOUD</code> with{' '}
+            <code className="font-mono">gemini-3.8-flash</code> to test cross-chapter
+            comprehension across long transcripts.
+          </p>
+        </div>
+      )}
+
+      {questions.length > 0 && (
+        <div className="space-y-3">
+          {/* Score Bar */}
+          <div
+            aria-live="polite"
+            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+              Score: {correctCount} / {questions.length}{' '}
+              <span className="font-normal text-slate-600 dark:text-slate-400">
+                ({answeredCount} answered)
+              </span>
+            </div>
+            {answeredCount > 0 && (
+              <button
+                type="button"
+                onClick={onResetQuiz}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                Retry
+              </button>
+            )}
+          </div>
+
+          {/* Questions */}
+          {questions.map((q, qIdx) => {
+            const selected = answers[q.id];
+            const isAnswered = selected !== undefined;
+            const isWrong = isAnswered && selected !== q.correctIndex;
+            const explainKey = `quiz:${q.id}`;
+            const simpleExp = explanations[explainKey];
+            const isExplaining = explainingKey === explainKey;
+
+            return (
+              <article
+                key={q.id}
+                className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-xs leading-snug font-semibold text-slate-900 dark:text-slate-100">
+                    {qIdx + 1}. {q.question}
+                  </h3>
+                  {isYouTubeSource && (
+                    <button
+                      type="button"
+                      onClick={() => onSeekVideo(q.startSeconds)}
+                      aria-label={`Jump to lecture timestamp ${q.timestamp}`}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-indigo-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-700 hover:bg-indigo-500/20 dark:text-indigo-300"
+                      title={`Review concept at ${q.timestamp}`}
+                    >
+                      <Clock className="h-2.5 w-2.5" aria-hidden="true" />
+                      {q.timestamp}
+                    </button>
+                  )}
+                </div>
+
+                <fieldset className="space-y-1.5">
+                  <legend className="sr-only">
+                    Answer choices for question {qIdx + 1}
+                  </legend>
+                  {q.options.map((opt, optIdx) => {
+                    const letter = String.fromCharCode(65 + optIdx);
+                    const isPicked = selected === optIdx;
+                    const isCorrectOption = optIdx === q.correctIndex;
+
+                    let style =
+                      'border-slate-200 bg-slate-50 text-slate-700 hover:border-indigo-400 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200';
+                    if (isAnswered) {
+                      if (isCorrectOption) {
+                        style =
+                          'border-emerald-500/50 bg-emerald-500/15 text-emerald-900 dark:text-emerald-200';
+                      } else if (isPicked) {
+                        style =
+                          'border-rose-500/50 bg-rose-500/15 text-rose-900 dark:text-rose-200';
+                      } else {
+                        style =
+                          'border-slate-200 bg-slate-50/50 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400';
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={`${q.id}-opt-${optIdx}`}
+                        type="button"
+                        disabled={isAnswered}
+                        aria-pressed={isPicked}
+                        onClick={() => onSelectAnswer(q.id, optIdx)}
+                        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition ${style}`}
+                      >
+                        <span>
+                          <span className="font-semibold">{letter}. </span>
+                          {opt}
+                          {isAnswered && isCorrectOption && (
+                            <span className="sr-only"> (Correct answer)</span>
+                          )}
+                          {isAnswered && isPicked && !isCorrectOption && (
+                            <span className="sr-only">
+                              {' '}
+                              (Your choice, incorrect)
+                            </span>
+                          )}
+                        </span>
+                        {isAnswered && isCorrectOption && (
+                          <CheckCircle2
+                            className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                            aria-hidden="true"
+                          />
+                        )}
+                        {isAnswered && isPicked && !isCorrectOption && (
+                          <XCircle
+                            className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </fieldset>
+
+                {isAnswered && (
+                  <div className="space-y-2">
+                    <p className="rounded-lg bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
+                      <span className="font-semibold text-slate-900 dark:text-slate-100">
+                        Explanation:{' '}
+                      </span>
+                      {q.explanation}
+                    </p>
+
+                    {onExplainConcept && !simpleExp && (
+                      <button
+                        type="button"
+                        disabled={Boolean(explainingKey)}
+                        onClick={() =>
+                          onExplainConcept(
+                            explainKey,
+                            q.question,
+                            `${q.explanation} Correct answer: ${q.options[q.correctIndex] ?? ''}`,
+                          )
+                        }
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold transition disabled:opacity-50 ${
+                          isWrong
+                            ? 'bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/30 hover:bg-amber-500/25 dark:text-amber-300'
+                            : 'bg-indigo-500/10 text-indigo-700 hover:bg-indigo-500/20 dark:text-indigo-300'
+                        }`}
+                      >
+                        {isExplaining ? (
+                          <>
+                            <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden="true" />
+                            <span>Tutoring on-device...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lightbulb className="h-2.5 w-2.5" aria-hidden="true" />
+                            <span>
+                              {isWrong
+                                ? 'Missed this? Explain Simply (Nano)'
+                                : 'Explain Simply (Nano)'}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {simpleExp && (
+                      <div className="space-y-1 rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-2 text-[11px] text-emerald-900 dark:text-emerald-200">
+                        <p>
+                          <span className="font-semibold">Nano Analogy: </span>
+                          {simpleExp.analogy}
+                        </p>
+                        <p>
+                          <span className="font-semibold">Key Idea: </span>
+                          {simpleExp.keyIdea}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
