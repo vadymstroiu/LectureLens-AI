@@ -9,11 +9,17 @@ export interface TranscriptChunk {
   label: string;
   startTimestamp: string;
   endTimestamp: string;
+  startSeconds: number;
+  endSeconds: number;
   charCount: number;
   text: string;
   segments: TranscriptSegment[];
 }
 
+/**
+ * Supported origin types for captured study content.
+ * Note: `'sample'` is retained only for backwards-compatible deserialization of previously stored local sessions.
+ */
 export type ContentSourceType = 'youtube' | 'article' | 'manual' | 'sample';
 
 export interface CapturedContent {
@@ -71,6 +77,18 @@ export interface QuizData {
   questions: QuizQuestion[];
 }
 
+/**
+ * User-authored study note optionally anchored to a lecture timestamp.
+ */
+export interface UserNote {
+  id: string;
+  text: string;
+  timestamp?: string;
+  startSeconds?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface SimpleExplanation {
   analogy: string;
   keyIdea: string;
@@ -88,6 +106,23 @@ export type OnDeviceAvailability =
 
 export type StudyTaskKind = 'notes' | 'flashcards' | 'quiz' | 'explain';
 
+/**
+ * Active stage inside the automatic capture-to-study-kit pipeline.
+ */
+export type PipelineStage = 'notes' | 'flashcards' | 'quiz';
+
+/**
+ * Live progress metadata for multi-stage and multi-chapter AI execution.
+ */
+export interface PipelineProgress {
+  stage: PipelineStage;
+  stageIndex: number;
+  totalStages: number;
+  chapterIndex?: number;
+  totalChapters?: number;
+  chapterLabel?: string;
+}
+
 export interface InferenceTelemetry {
   source: InferenceSourceValue;
   latencyMs: number;
@@ -104,6 +139,7 @@ export interface LectureSession {
   masteredCardIds: string[];
   quiz?: QuizData;
   quizAnswers: Record<string, number>;
+  userNotes?: UserNote[];
   explanations?: Record<string, SimpleExplanation>;
   lastTelemetry?: InferenceTelemetry;
   telemetryHistory: InferenceTelemetry[];
@@ -142,4 +178,31 @@ export type SeekVideoResponse =
       error: string;
     };
 
-export type ExtensionMessage = CaptureTranscriptRequest | SeekVideoRequest;
+export interface GetVideoTimeRequest {
+  type: 'GET_VIDEO_TIME';
+}
+
+export type GetVideoTimeResponse =
+  | {
+      ok: true;
+      currentSeconds: number;
+      timestamp: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+export interface PauseVideoRequest {
+  type: 'PAUSE_VIDEO';
+}
+
+export interface PauseVideoResponse {
+  ok: boolean;
+}
+
+export type ExtensionMessage =
+  | CaptureTranscriptRequest
+  | SeekVideoRequest
+  | GetVideoTimeRequest
+  | PauseVideoRequest;

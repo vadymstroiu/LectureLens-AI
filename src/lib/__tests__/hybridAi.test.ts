@@ -7,20 +7,29 @@ import {
   type HybridParams,
 } from 'firebase/ai';
 import {
+  ALL_CHAPTERS_ID,
   analyzeContentWindow,
   buildExplainModelParams,
   buildFlashcardsModelParams,
+  buildFullLectureFlashcardsCloudParams,
   buildNotesModelParams,
   buildQuizModelParams,
   chunkTranscriptSegments,
   CLOUD_MODEL_NAME,
   computeExecutionProgress,
+  computeTargetCounts,
   explainConceptSimply,
+  extractFullLectureStudyNotes,
   extractStudyNotes,
+  filterItemsByChunk,
   formatLatency,
   generateFlashcards,
+  generateFullLectureFlashcards,
   generatePracticeQuiz,
   HybridAiError,
+  MAX_ON_DEVICE_CHAPTERS,
+  mergeFlashcards,
+  mergeStudyNotes,
   ON_DEVICE_CHAR_LIMIT,
   parseStructuredJson,
   resolveLocalFirstMode,
@@ -29,16 +38,18 @@ import {
   triggerOnDeviceDownload,
 } from '../hybridAi';
 import {
+  buildYouTubeTimestampUrl,
   extractCaptionTrackUrlFromHtml,
   extractVideoId,
   formatTimestamp,
+  normalizeOptionalTimestamp,
+  normalizeTimestampFields,
   parseJson3Captions,
   parseTranscriptDomRow,
   parseXmlCaptions,
 } from '../../content/youtubeTranscriptParser';
 import {
-  escapeCsvField,
-  formatAnkiCsv,
+  buildMarkdownFilename,
   formatStudyMarkdown,
 } from '../../sidepanel/exporters';
 import type { LectureSession } from '../../types/lecture';
@@ -278,27 +289,40 @@ describe('Hybrid AI routing & model configuration', () => {
     const destroySpy = vi.fn();
     const progressSpy = vi.fn();
 
+    const availabilitySpy = vi.fn().mockResolvedValue('available');
+    const createSpy = vi.fn().mockImplementation(async (opts?: {
+      monitor?: (m: {
+        addEventListener: (
+          t: string,
+          cb: (e: { loaded: number }) => void,
+        ) => void;
+      }) => void;
+    }) => {
+      opts?.monitor?.({
+        addEventListener: (_t, cb) => {
+          cb({ loaded: 0.63 });
+        },
+      });
+      return { destroy: destroySpy };
+    });
+
     (globalThis as Record<string, unknown>).LanguageModel = {
-      availability: vi.fn().mockResolvedValue('available'),
-      create: vi.fn().mockImplementation(async (opts?: {
-        monitor?: (m: {
-          addEventListener: (
-            t: string,
-            cb: (e: { loaded: number }) => void,
-          ) => void;
-        }) => void;
-      }) => {
-        opts?.monitor?.({
-          addEventListener: (_t, cb) => {
-            cb({ loaded: 0.63 });
-          },
-        });
-        return { destroy: destroySpy };
-      }),
+      availability: availabilitySpy,
+      create: createSpy,
     };
 
     try {
       const status = await triggerOnDeviceDownload(progressSpy);
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedInputs: [{ type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        }),
+      );
+      expect(availabilitySpy).toHaveBeenCalledWith({
+        expectedInputs: [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+      });
       expect(progressSpy).toHaveBeenCalledWith(63);
       expect(destroySpy).toHaveBeenCalledTimes(1);
       expect(status).toBe('available');
@@ -490,7 +514,7 @@ describe('Content window analysis & transcript chunking', () => {
   });
 });
 
-describe('Markdown & Anki CSV exporters', () => {
+describe('Complete Markdown exporter', () => {
   const sampleSession: LectureSession = {
     sourceId: 'yt:abc123',
     content: {
@@ -500,7 +524,7 @@ describe('Markdown & Anki CSV exporters', () => {
       url: 'https://www.youtube.com/watch?v=abc123',
       segments: [],
       rawText: 'Transcript',
-      capturedAt: 1000,
+      capturedAt: 1700000000000,
     },
     notes: {
       overview: 'Covers local and cloud routing.',
@@ -520,42 +544,152 @@ describe('Markdown & Anki CSV exporters', () => {
         },
       ],
     },
+    userNotes: [
+      {
+        id: 'n1',
+        text: 'Review App Check debug token setup before demo.',
+        timestamp: '03:00',
+        startSeconds: 180,
+        createdAt: 1700000001000,
+        updatedAt: 1700000001000,
+      },
+      {
+        id: 'n2',
+        text: 'Remember to test offline mode.',
+        createdAt: 1700000002000,
+        updatedAt: 1700000002000,
+      },
+    ],
     flashcards: {
       cards: [
         {
           id: 'c1',
           front: 'What is "App Check", and why use it?',
-          back: 'Protects Firebase backends from abuse\nacross clients.',
+          back: 'Protects Firebase backends from abuse across clients.',
           timestamp: '02:30',
           startSeconds: 150,
         },
+        {
+          id: 'c2',
+          front: 'What runs on-device?',
+          back: 'Gemini Nano.',
+          timestamp: '01:15',
+          startSeconds: 75,
+        },
       ],
     },
-    masteredCardIds: [],
-    quizAnswers: {},
-    telemetryHistory: [],
-    updatedAt: 1000,
+    masteredCardIds: ['c1'],
+    quiz: {
+      questions: [
+        {
+          id: 'q1',
+          question: 'Which mode prefers local Gemini Nano with cloud fallback?',
+          options: [
+            'ONLY_IN_CLOUD',
+            'PREFER_ON_DEVICE',
+            'ONLY_ON_DEVICE',
+            'MANUAL',
+          ],
+          correctIndex: 1,
+          explanation: 'PREFER_ON_DEVICE tries Nano first and falls back to Cloud.',
+          timestamp: '04:00',
+          startSeconds: 240,
+        },
+      ],
+    },
+    quizAnswers: { q1: 1 },
+    explanations: {
+      'def:App Check': {
+        analogy: 'Like a bouncer checking a stamped wristband.',
+        keyIdea: 'Ensures only genuine apps call your Firebase backend.',
+      },
+      'quiz:q1': {
+        analogy: 'Like trying your local workshop before ordering from a warehouse.',
+        keyIdea: 'Local first reduces latency while keeping cloud reliability.',
+      },
+    },
+    telemetryHistory: [
+      {
+        source: 'ON_DEVICE',
+        latencyMs: 320,
+        task: 'notes',
+        modelLabel: 'Gemini Nano',
+        timestamp: 1000,
+      },
+      {
+        source: 'IN_CLOUD',
+        latencyMs: 1400,
+        task: 'quiz',
+        modelLabel: CLOUD_MODEL_NAME,
+        timestamp: 2000,
+      },
+    ],
+    updatedAt: 1700000002000,
   };
 
-  it('formats study Markdown with clickable timestamp notation and flashcards', () => {
+  it('exports all generated sections, personal notes, quiz, analogies, and clickable YouTube links', () => {
     const md = formatStudyMarkdown(sampleSession);
     expect(md).toContain('# Hybrid AI Deep Dive');
-    expect(md).toContain('- [01:15] Use PREFER_ON_DEVICE for low latency.');
-    expect(md).toContain('- **App Check** (02:30): Verifies genuine client traffic.');
-    expect(md).toContain('**Q:** What is "App Check", and why use it?');
-    expect(md).toContain('[02:30]');
+    expect(md).toContain('**Source:** [https://www.youtube.com/watch?v=abc123]');
+    expect(md).toContain('**Hybrid AI Telemetry:** 1 local (Gemini Nano), 1 cloud (50% on-device)');
+    expect(md).toContain(
+      '- [01:15](https://www.youtube.com/watch?v=abc123&t=75s) Use PREFER_ON_DEVICE for low latency.',
+    );
+    expect(md).toContain(
+      '- **App Check** ([02:30](https://www.youtube.com/watch?v=abc123&t=150s)): Verifies genuine client traffic.',
+    );
+    expect(md).toContain('*Analogy:* Like a bouncer checking a stamped wristband.');
+    expect(md).toContain('## Personal Notes');
+    expect(md).toContain(
+      '- [03:00](https://www.youtube.com/watch?v=abc123&t=180s) Review App Check debug token setup before demo.',
+    );
+    expect(md).toContain('- Remember to test offline mode.');
+    expect(md).toContain('*1 of 2 mastered*');
+    expect(md).toContain('1. [x] **Q:** What is "App Check", and why use it?');
+    expect(md).toContain('2. [ ] **Q:** What runs on-device?');
+    expect(md).toContain('## Practice Quiz');
+    expect(md).toContain('*Score: 1 / 1 (1 answered)*');
+    expect(md).toContain('### 1. Which mode prefers local Gemini Nano with cloud fallback? ([04:00](https://www.youtube.com/watch?v=abc123&t=240s))');
+    expect(md).toContain('- B. PREFER_ON_DEVICE **(Correct)** *(Your answer)*');
+    expect(md).toContain('> **Explanation:** PREFER_ON_DEVICE tries Nano first and falls back to Cloud.');
+    expect(md).toContain('> **Nano Analogy:** Like trying your local workshop');
   });
 
-  it('escapes commas, quotes, and newlines in RFC-4180 Anki CSV export', () => {
-    expect(escapeCsvField('plain')).toBe('plain');
-    expect(escapeCsvField('a, "b"\nc')).toBe('"a, ""b""\nc"');
-
-    const csv = formatAnkiCsv(sampleSession.flashcards!.cards);
-    const lines = csv.split('\n');
-    expect(lines[0]).toBe('front,back');
-    expect(csv).toContain('"What is ""App Check"", and why use it?"');
-    expect(csv).toContain(
-      '"Protects Firebase backends from abuse\nacross clients. [02:30]"',
+  it('keeps genuine non-zero manual timestamps, omits 00:00 on non-YouTube sources, and builds clean .md filenames', () => {
+    const manualSession: LectureSession = {
+      ...sampleSession,
+      sourceId: 'manual:1',
+      content: {
+        ...sampleSession.content,
+        sourceId: 'manual:1',
+        sourceType: 'manual',
+        title: 'Distributed Systems: Week 3!',
+        url: '',
+      },
+      notes: {
+        overview: 'Article overview.',
+        takeaways: [
+          {
+            point: 'Article takeaway without timeline.',
+            timestamp: '00:00',
+            startSeconds: 0,
+          },
+          {
+            point: 'Use PREFER_ON_DEVICE for low latency.',
+            timestamp: '01:15',
+            startSeconds: 75,
+          },
+        ],
+        definitions: [],
+      },
+    };
+    const md = formatStudyMarkdown(manualSession);
+    expect(md).toContain('- Article takeaway without timeline.');
+    expect(md).not.toContain('[00:00]');
+    expect(md).toContain('- [01:15] Use PREFER_ON_DEVICE for low latency.');
+    expect(md).not.toContain('youtube.com/watch');
+    expect(buildMarkdownFilename('Distributed Systems: Week 3!')).toBe(
+      'lecturelens-distributed-systems-week-3.md',
     );
   });
 });
@@ -611,6 +745,36 @@ describe('YouTube transcript & URL parsers', () => {
     expect(parseTranscriptDomRow('00:10', '   ')).toBeNull();
   });
 
+  it('builds deep-linked YouTube timestamp URLs and validates optional note timestamps', () => {
+    expect(
+      buildYouTubeTimestampUrl(
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=12s',
+        185,
+      ),
+    ).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=185s');
+    expect(buildYouTubeTimestampUrl('https://youtu.be/abc123XYZ', 0)).toBe(
+      'https://www.youtube.com/watch?v=abc123XYZ&t=0s',
+    );
+    expect(
+      buildYouTubeTimestampUrl('https://www.youtube.com/shorts/short99', -4),
+    ).toBe('https://www.youtube.com/watch?v=short99&t=0s');
+    expect(
+      buildYouTubeTimestampUrl('https://example.com/article', 90),
+    ).toBeNull();
+
+    expect(normalizeOptionalTimestamp('4:15')).toEqual({
+      timestamp: '04:15',
+      startSeconds: 255,
+    });
+    expect(normalizeOptionalTimestamp('[1:05:09]')).toEqual({
+      timestamp: '1:05:09',
+      startSeconds: 3909,
+    });
+    expect(normalizeOptionalTimestamp('02:75')).toBeNull();
+    expect(normalizeOptionalTimestamp('abc')).toBeNull();
+    expect(normalizeOptionalTimestamp('   ')).toBeNull();
+  });
+
   it('wires onDownloadProgress monitor callback into onDeviceParams.createOptions', () => {
     const progressSpy = vi.fn();
     const params = buildNotesModelParams('local-only', progressSpy);
@@ -627,5 +791,477 @@ describe('YouTube transcript & URL parsers', () => {
 
     capturedHandler?.({ loaded: 0.42 });
     expect(progressSpy).toHaveBeenCalledWith(42);
+  });
+});
+
+describe('Full-lecture scaling, map-reduce, cancellation & chapter filtering', () => {
+  it('scales target counts proportionally from short excerpts to 39m+ lectures', () => {
+    const shortCounts = computeTargetCounts(4000);
+    expect(shortCounts.quizCount).toBe(5);
+    expect(shortCounts.flashcardsMax).toBe(8);
+
+    const medCounts = computeTargetCounts(12000);
+    expect(medCounts.quizCount).toBe(8);
+    expect(medCounts.flashcardsMax).toBe(14);
+
+    const longCounts = computeTargetCounts(28000);
+    expect(longCounts.quizCount).toBe(10);
+    expect(longCounts.flashcardsMax).toBe(20);
+
+    const extraLongCounts = computeTargetCounts(42000);
+    expect(extraLongCounts.quizCount).toBe(12);
+    expect(extraLongCounts.takeawaysMax).toBeGreaterThanOrEqual(18);
+    expect(extraLongCounts.flashcardsMax).toBeGreaterThanOrEqual(20);
+  });
+
+  it('scales generatePracticeQuiz to 12 questions for a 42,000-char lecture', async () => {
+    const longLecture = 'x'.repeat(42000);
+    const mockQuestions = Array.from({ length: 14 }, (_, i) => ({
+      id: `q-${i + 1}`,
+      question: `Question ${i + 1}`,
+      options: ['A', 'B', 'C', 'D'],
+      correctIndex: 0,
+      explanation: 'Explanation',
+      timestamp: formatTimestamp(i * 180),
+      startSeconds: i * 180,
+    }));
+
+    const result = await generatePracticeQuiz(longLecture, {
+      ai: MOCK_AI,
+      modelFactory: () => ({
+        generateContent: vi
+          .fn()
+          .mockResolvedValue(
+            createMockResult({ questions: mockQuestions }, InferenceSource.IN_CLOUD),
+          ),
+      }),
+    });
+
+    expect(result.data.questions).toHaveLength(12);
+  });
+
+  it('runs on-device chapter map-reduce for extractFullLectureStudyNotes when Nano is available', async () => {
+    const segments = Array.from({ length: 90 }, (_, idx) => ({
+      startSeconds: idx * 25,
+      timestamp: formatTimestamp(idx * 25),
+      text: `Concept segment ${idx}: `.padEnd(180, 'a'),
+    }));
+    const chunks = chunkTranscriptSegments(segments);
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+
+    const fullText = segments.map((s) => `[${s.timestamp}] ${s.text}`).join('\n');
+    const progressCalls: Array<[number, number, string]> = [];
+    let callIdx = 0;
+
+    const generateContent = vi.fn().mockImplementation(async () => {
+      const current = callIdx++;
+      const chunkStart = chunks[current]?.startSeconds ?? 0;
+      return createMockResult(
+        {
+          overview: `Summary ${current}`,
+          takeaways: [
+            {
+              point: `Takeaway from chapter ${current + 1}`,
+              timestamp: formatTimestamp(chunkStart + 5),
+              startSeconds: chunkStart + 5,
+            },
+          ],
+          definitions: [
+            {
+              term: `Term ${current + 1}`,
+              definition: `Definition ${current + 1}`,
+              timestamp: formatTimestamp(chunkStart + 10),
+              startSeconds: chunkStart + 10,
+            },
+          ],
+        },
+        InferenceSource.ON_DEVICE,
+      );
+    });
+
+    const result = await extractFullLectureStudyNotes(chunks, fullText, 'hybrid', {
+      ai: MOCK_AI,
+      checkAvailability: async () => 'available',
+      onChapterProgress: (c, t, label) => progressCalls.push([c, t, label]),
+      modelFactory: () => ({ generateContent }),
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(chunks.length);
+    expect(progressCalls).toHaveLength(chunks.length);
+    expect(result.telemetry.source).toBe('ON_DEVICE');
+    expect(result.data.takeaways).toHaveLength(chunks.length);
+    expect(result.data.definitions).toHaveLength(chunks.length);
+  });
+
+  it('uses a single Cloud call for extractFullLectureStudyNotes when Nano is unavailable in hybrid mode', async () => {
+    const segments = Array.from({ length: 80 }, (_, idx) => ({
+      startSeconds: idx * 30,
+      timestamp: formatTimestamp(idx * 30),
+      text: `Cloud fallback segment ${idx} `.padEnd(160, 'b'),
+    }));
+    const chunks = chunkTranscriptSegments(segments);
+    const fullText = segments.map((s) => `[${s.timestamp}] ${s.text}`).join('\n');
+
+    let capturedMode: InferenceMode | undefined;
+    const generateContent = vi.fn().mockResolvedValue(
+      createMockResult(
+        {
+          overview: 'Full lecture cloud summary.',
+          takeaways: [
+            { point: 'Start takeaway', timestamp: '00:30', startSeconds: 30 },
+            { point: 'End takeaway', timestamp: '39:00', startSeconds: 2340 },
+          ],
+          definitions: [
+            {
+              term: 'Hybrid Cloud Fallback',
+              definition: 'Single-call full-lecture synthesis.',
+              timestamp: '10:00',
+              startSeconds: 600,
+            },
+          ],
+        },
+        InferenceSource.IN_CLOUD,
+      ),
+    );
+
+    const result = await extractFullLectureStudyNotes(chunks, fullText, 'hybrid', {
+      ai: MOCK_AI,
+      checkAvailability: async () => 'unavailable',
+      modelFactory: (_ai, params) => {
+        capturedMode = params.mode;
+        return { generateContent };
+      },
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(capturedMode).toBe(InferenceMode.ONLY_IN_CLOUD);
+    expect(result.telemetry.source).toBe('IN_CLOUD');
+    expect(result.data.takeaways).toHaveLength(2);
+  });
+
+  it('supports full-lecture flashcards map-reduce, cloud fallback, and AbortSignal cancellation', async () => {
+    const segments = Array.from({ length: 70 }, (_, idx) => ({
+      startSeconds: idx * 25,
+      timestamp: formatTimestamp(idx * 25),
+      text: `Flashcard segment ${idx} `.padEnd(170, 'c'),
+    }));
+    const chunks = chunkTranscriptSegments(segments);
+    const fullText = segments.map((s) => `[${s.timestamp}] ${s.text}`).join('\n');
+
+    // Cloud fallback single call
+    const cloudGenerate = vi.fn().mockResolvedValue(
+      createMockResult(
+        {
+          cards: [
+            {
+              id: 'c1',
+              front: 'Q1',
+              back: 'A1',
+              timestamp: '01:00',
+              startSeconds: 60,
+            },
+          ],
+        },
+        InferenceSource.IN_CLOUD,
+      ),
+    );
+
+    const cloudResult = await generateFullLectureFlashcards(
+      chunks,
+      fullText,
+      'hybrid',
+      {
+        ai: MOCK_AI,
+        checkAvailability: async () => 'unavailable',
+        modelFactory: () => ({ generateContent: cloudGenerate }),
+      },
+    );
+    expect(cloudGenerate).toHaveBeenCalledTimes(1);
+    expect(cloudResult.data.cards).toHaveLength(1);
+
+    // AbortSignal cancellation
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      generateFullLectureFlashcards(chunks, fullText, 'local-only', {
+        ai: MOCK_AI,
+        signal: controller.signal,
+        modelFactory: () => ({ generateContent: vi.fn() }),
+      }),
+    ).rejects.toMatchObject({
+      name: 'HybridAiError',
+      code: 'ABORTED',
+    });
+  });
+
+  it('filters items by chapter bounds without dropping gap timestamps and merges without duplicates', () => {
+    const chunks = [
+      {
+        id: 'chunk-1',
+        label: 'Part 1 (00:00–04:50)',
+        startTimestamp: '00:00',
+        endTimestamp: '04:50',
+        startSeconds: 0,
+        endSeconds: 290,
+        charCount: 100,
+        text: '',
+        segments: [],
+      },
+      {
+        id: 'chunk-2',
+        label: 'Part 2 (05:10–10:00)',
+        startTimestamp: '05:10',
+        endTimestamp: '10:00',
+        startSeconds: 310,
+        endSeconds: 600,
+        charCount: 100,
+        text: '',
+        segments: [],
+      },
+    ];
+
+    const items = [
+      { id: 'a', startSeconds: 120 },
+      { id: 'gap', startSeconds: 295 },
+      { id: 'b', startSeconds: 400 },
+    ];
+
+    expect(filterItemsByChunk(items, chunks, ALL_CHAPTERS_ID)).toHaveLength(3);
+    expect(filterItemsByChunk(items, chunks, 'chunk-1').map((i) => i.id)).toEqual([
+      'a',
+      'gap',
+    ]);
+    expect(filterItemsByChunk(items, chunks, 'chunk-2').map((i) => i.id)).toEqual([
+      'b',
+    ]);
+
+    const mergedNotes = mergeStudyNotes(
+      {
+        overview: 'First overview',
+        takeaways: [{ point: 'Point A', timestamp: '02:00', startSeconds: 120 }],
+        definitions: [
+          {
+            term: 'Nano',
+            definition: 'Local model',
+            timestamp: '00:30',
+            startSeconds: 30,
+          },
+        ],
+      },
+      {
+        overview: 'Second overview',
+        takeaways: [
+          { point: 'point a', timestamp: '02:00', startSeconds: 120 },
+          { point: 'Point B', timestamp: '00:45', startSeconds: 45 },
+        ],
+        definitions: [
+          {
+            term: 'nano',
+            definition: 'Duplicate term',
+            timestamp: '00:30',
+            startSeconds: 30,
+          },
+        ],
+      },
+    );
+
+    expect(mergedNotes.overview).toBe('First overview');
+    expect(mergedNotes.takeaways.map((t) => t.point)).toEqual([
+      'Point B',
+      'Point A',
+    ]);
+    expect(mergedNotes.definitions).toHaveLength(1);
+
+    const mergedCards = mergeFlashcards(
+      {
+        cards: [
+          {
+            id: 'c1',
+            front: 'What is Nano?',
+            back: 'Local model',
+            timestamp: '03:00',
+            startSeconds: 180,
+          },
+        ],
+      },
+      {
+        cards: [
+          {
+            id: 'c1',
+            front: 'what is nano?',
+            back: 'Dup',
+            timestamp: '03:00',
+            startSeconds: 180,
+          },
+          {
+            id: 'c1',
+            front: 'What is Flash?',
+            back: 'Cloud model',
+            timestamp: '01:00',
+            startSeconds: 60,
+          },
+        ],
+      },
+    );
+
+    expect(mergedCards.cards.map((c) => c.front)).toEqual([
+      'What is Flash?',
+      'What is Nano?',
+    ]);
+    expect(new Set(mergedCards.cards.map((c) => c.id)).size).toBe(2);
+  });
+
+  it('covers up to 12 on-device chapters and enforces minItems/maxItems on flashcard and quiz schemas', async () => {
+    expect(MAX_ON_DEVICE_CHAPTERS).toBe(12);
+
+    const cardsParams = buildFlashcardsModelParams('hybrid', undefined, [3, 4]);
+    const cloudCardsSchema = cardsParams.inCloudParams?.generationConfig
+      ?.responseSchema as unknown as {
+      properties?: { cards?: { minItems?: number; maxItems?: number } };
+    };
+    const nanoCardsConstraint = cardsParams.onDeviceParams?.promptOptions
+      ?.responseConstraint as {
+      properties?: { cards?: { minItems?: number; maxItems?: number } };
+    };
+    expect(cloudCardsSchema?.properties?.cards?.minItems).toBe(3);
+    expect(cloudCardsSchema?.properties?.cards?.maxItems).toBe(4);
+    expect(nanoCardsConstraint?.properties?.cards?.minItems).toBe(3);
+    expect(nanoCardsConstraint?.properties?.cards?.maxItems).toBe(4);
+
+    const fullCloudCardsParams = buildFullLectureFlashcardsCloudParams([18, 24]);
+    const fullCardsSchema = fullCloudCardsParams.inCloudParams?.generationConfig
+      ?.responseSchema as unknown as {
+      properties?: { cards?: { minItems?: number; maxItems?: number } };
+    };
+    expect(fullCardsSchema?.properties?.cards?.minItems).toBe(18);
+    expect(fullCardsSchema?.properties?.cards?.maxItems).toBe(24);
+
+    const quiz12Params = buildQuizModelParams(12);
+    const quiz12Schema = quiz12Params.inCloudParams?.generationConfig
+      ?.responseSchema as unknown as {
+      properties?: {
+        questions?: {
+          minItems?: number;
+          maxItems?: number;
+          items?: {
+            properties?: {
+              options?: { minItems?: number; maxItems?: number };
+            };
+          };
+        };
+      };
+    };
+    expect(quiz12Schema?.properties?.questions?.minItems).toBe(12);
+    expect(quiz12Schema?.properties?.questions?.maxItems).toBe(12);
+    expect(
+      quiz12Schema?.properties?.questions?.items?.properties?.options?.minItems,
+    ).toBe(4);
+    expect(
+      quiz12Schema?.properties?.questions?.items?.properties?.options?.maxItems,
+    ).toBe(4);
+
+    // 9-chapter lecture runs all 9 chunks without skipping any chapter
+    const nineChunks = Array.from({ length: 9 }, (_, i) => ({
+      id: `chunk-${i + 1}`,
+      label: `Part ${i + 1}`,
+      startTimestamp: formatTimestamp(i * 300),
+      endTimestamp: formatTimestamp((i + 1) * 300),
+      startSeconds: i * 300,
+      endSeconds: (i + 1) * 300,
+      charCount: 5500,
+      text: `[${formatTimestamp(i * 300)}] Chapter ${i + 1} detailed content `.padEnd(5500, 'd'),
+      segments: [],
+    }));
+    const fullText9 = nineChunks.map((c) => c.text).join('\n');
+
+    let cardCallIdx = 0;
+    const generateContent = vi.fn().mockImplementation(async () => {
+      const idx = cardCallIdx++;
+      const ts = nineChunks[idx]?.startSeconds ?? 0;
+      return createMockResult(
+        {
+          cards: [
+            {
+              id: 'c1',
+              front: `Question ${idx + 1}A`,
+              back: 'Answer A',
+              timestamp: formatTimestamp(ts),
+              startSeconds: ts,
+            },
+            {
+              id: 'c2',
+              front: `Question ${idx + 1}B`,
+              back: 'Answer B',
+              timestamp: formatTimestamp(ts + 10),
+              startSeconds: ts + 10,
+            },
+            {
+              id: 'c3',
+              front: `Question ${idx + 1}C`,
+              back: 'Answer C',
+              timestamp: formatTimestamp(ts + 20),
+              startSeconds: ts + 20,
+            },
+          ],
+        },
+        InferenceSource.ON_DEVICE,
+      );
+    });
+
+    const cardsRes = await generateFullLectureFlashcards(
+      nineChunks,
+      fullText9,
+      'hybrid',
+      {
+        ai: MOCK_AI,
+        checkAvailability: async () => 'available',
+        modelFactory: () => ({ generateContent }),
+      },
+    );
+
+    expect(generateContent).toHaveBeenCalledTimes(9);
+    expect(cardsRes.data.cards).toHaveLength(27);
+  });
+
+  it('strips square brackets from timestamps, repairs wrong model startSeconds, and sorts chronologically', async () => {
+    expect(
+      normalizeTimestampFields({ timestamp: '[12:36]', startSeconds: 12 }),
+    ).toEqual({
+      timestamp: '12:36',
+      startSeconds: 756,
+    });
+
+    const notesRes = await extractStudyNotes('[05:33] Lecture text', 'hybrid', {
+      ai: MOCK_AI,
+      modelFactory: () => ({
+        generateContent: vi.fn().mockResolvedValue(
+          createMockResult(
+            {
+              overview: 'Summary',
+              takeaways: [
+                {
+                  point: 'Second takeaway',
+                  timestamp: '[12:36]',
+                  startSeconds: 12,
+                },
+                {
+                  point: 'First takeaway',
+                  timestamp: '05:33',
+                  startSeconds: 333,
+                },
+              ],
+              definitions: [],
+            },
+            InferenceSource.ON_DEVICE,
+          ),
+        ),
+      }),
+    });
+
+    expect(notesRes.data.takeaways).toEqual([
+      { point: 'First takeaway', timestamp: '05:33', startSeconds: 333 },
+      { point: 'Second takeaway', timestamp: '12:36', startSeconds: 756 },
+    ]);
   });
 });

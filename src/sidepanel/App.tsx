@@ -1,74 +1,76 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
-  BookOpen,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  ClipboardCopy,
-  Download,
-  ExternalLink,
-  FileText,
-  FolderOpen,
-  HardDrive,
-  HelpCircle,
-  Layers,
-  Moon,
-  RefreshCw,
-  ShieldCheck,
-  Sparkles,
-  Sun,
-  Trash2,
-  Youtube,
-  Zap,
-} from 'lucide-react';
-import {
-  formatSegmentsAsTranscript,
-  mergeCaptionSegments,
-  parseTranscriptDomRow,
-} from '../content/youtubeTranscriptParser';
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
+import { BookOpen, HelpCircle, Layers } from 'lucide-react';
+import { formatSegmentsAsTranscript } from '../content/youtubeTranscriptParser';
 import { isFirebaseConfigured } from '../lib/firebase';
 import {
+  ALL_CHAPTERS_ID,
   analyzeContentWindow,
   checkOnDeviceAvailability,
   chunkTranscriptSegments,
-  computeExecutionProgress,
   explainConceptSimply,
+  extractFullLectureStudyNotes,
   extractStudyNotes,
-  formatLatency,
+  filterItemsByChunk,
   generateFlashcards,
+  generateFullLectureFlashcards,
   generatePracticeQuiz,
   HybridAiError,
+  mergeFlashcards,
+  mergeStudyNotes,
   triggerOnDeviceDownload,
 } from '../lib/hybridAi';
 import type {
   CapturedContent,
-  CaptureTranscriptResponse,
   HybridRoutingPolicy,
   InferenceTelemetry,
   LectureSession,
   OnDeviceAvailability,
-  SeekVideoResponse,
+  PipelineProgress,
+  PipelineStage,
+  UserNote,
 } from '../types/lecture';
-import { FlashcardsTab } from './FlashcardsTab';
-import { InferenceBadge } from './InferenceBadge';
-import { NotesTab } from './NotesTab';
-import { QuizTab } from './QuizTab';
-import { SAMPLE_LECTURE_CONTENT } from './sampleLecture';
+import { CaptureCard } from './components/CaptureCard';
+import { ExportBar } from './components/ExportBar';
+import { HeaderBar } from './components/HeaderBar';
+import { HelpModal } from './components/HelpModal';
+import { HistoryDrawer } from './components/HistoryDrawer';
+import { OnboardingEmptyState } from './components/OnboardingEmptyState';
+import { StatusAlerts, type ErrorBannerState } from './components/StatusAlerts';
 import {
+  buildMarkdownFilename,
   downloadTextFile,
-  formatAnkiCsv,
   formatStudyMarkdown,
 } from './exporters';
+import { FlashcardsTab } from './FlashcardsTab';
+import { NotesTab } from './NotesTab';
+import { QuizTab } from './QuizTab';
 import {
   deleteSession,
+  getStorageUsageSummary,
   listSavedSessions,
   loadLastActiveSession,
   loadPreferences,
   loadSession,
   savePreferences,
   saveSession,
+  type StorageUsageSummary,
 } from './storage';
+import {
+  captureYouTubeFromActiveTab,
+  getCurrentYouTubeVideoTime,
+  grabSelectionFromActiveTab,
+  isYouTubeUrl,
+  openChromePage,
+  openSourceUrl,
+  seekOrOpenVideo,
+} from './youtubeBridge';
 
 type ActiveTab = 'notes' | 'flashcards' | 'quiz';
 
@@ -91,15 +93,13 @@ function hashText(input: string): string {
   return `text-${Math.abs(hash)}`;
 }
 
-async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
-  if (typeof chrome === 'undefined' || !chrome.tabs?.query) return null;
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs[0] ?? null;
-}
-
+/**
+ * Root Chrome Side Panel orchestrator for LectureLens AI.
+ */
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [policy, setPolicy] = useState<HybridRoutingPolicy>('hybrid');
+  const [autoGenerateOnCapture, setAutoGenerateOnCapture] = useState(true);
   const [onDeviceStatus, setOnDeviceStatus] =
     useState<OnDeviceAvailability>('unavailable');
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -109,27 +109,37 @@ export default function App() {
 
   const [session, setSession] = useState<LectureSession | null>(null);
   const [savedSessions, setSavedSessions] = useState<LectureSession[]>([]);
+  const [storageUsage, setStorageUsage] = useState<StorageUsageSummary | null>(
+    null,
+  );
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [selectedChunkId, setSelectedChunkId] = useState<string>('chunk-1');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [selectedChunkId, setSelectedChunkId] = useState<string>(ALL_CHAPTERS_ID);
   const [pasteDrawerOpen, setPasteDrawerOpen] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const [pastedTitle, setPastedTitle] = useState('');
 
   const [capturing, setCapturing] = useState(false);
   const [loadingTask, setLoadingTask] = useState<ActiveTab | null>(null);
+  const [pipelineProgress, setPipelineProgress] =
+    useState<PipelineProgress | null>(null);
   const [explainingKey, setExplainingKey] = useState<string | null>(null);
   const [downloadingNano, setDownloadingNano] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [errorState, setErrorState] = useState<{
-    message: string;
-    hint?: string;
-    code?: string;
-  } | null>(null);
+  const [errorState, setErrorState] = useState<ErrorBannerState | null>(null);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [dismissedSetupBanner, setDismissedSetupBanner] = useState(false);
   const nanoPrewarmAttemptedRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const onDeviceStatusRef = useRef<OnDeviceAvailability>(onDeviceStatus);
+  onDeviceStatusRef.current = onDeviceStatus;
+  const tabRefs = useRef<Record<ActiveTab, HTMLButtonElement | null>>({
+    notes: null,
+    flashcards: null,
+    quiz: null,
+  });
 
   const firebaseReady = isFirebaseConfigured();
 
@@ -137,17 +147,21 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     void (async () => {
-      const [prefs, lastSession, allSessions, nanoStatus] = await Promise.all([
-        loadPreferences(),
-        loadLastActiveSession(),
-        listSavedSessions(),
-        checkOnDeviceAvailability(),
-      ]);
+      const [prefs, lastSession, allSessions, usage, nanoStatus] =
+        await Promise.all([
+          loadPreferences(),
+          loadLastActiveSession(),
+          listSavedSessions(),
+          getStorageUsageSummary(),
+          checkOnDeviceAvailability(),
+        ]);
       if (!mounted) return;
       setTheme(prefs.theme);
       setPolicy(prefs.policy);
+      setAutoGenerateOnCapture(prefs.autoGenerateOnCapture);
       setOnDeviceStatus(nanoStatus);
       setSavedSessions(allSessions);
+      setStorageUsage(usage);
       if (lastSession) {
         setSession(lastSession);
       }
@@ -237,13 +251,24 @@ export default function App() {
     }
   };
 
-  const openChromePage = (url: string) => {
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      void chrome.tabs.create({ url });
+  const handleOpenChromePage = async (url: string) => {
+    const opened = await openChromePage(url);
+    if (!opened) {
+      setStatusBanner(`Copied ${url} — paste it into Chrome's address bar.`);
+    }
+  };
+
+  const handleOpenSourceUrl = async (url: string) => {
+    const res = await openSourceUrl(url);
+    if (!res.ok) {
+      await handleOpenChromePage(url);
       return;
     }
-    void navigator.clipboard?.writeText(url);
-    setStatusBanner(`Copied ${url} — paste it into Chrome's address bar.`);
+    if (res.action === 'already-active') {
+      setStatusBanner('Already viewing this lecture in the active tab.');
+    } else if (res.action === 'focused-existing-tab') {
+      setStatusBanner('Switched to your open lecture tab.');
+    }
   };
 
   const handleRecheckOrDownloadNano = async () => {
@@ -299,40 +324,77 @@ export default function App() {
       });
   };
 
+  const handleModelDownloadProgress = useCallback((pct: number) => {
+    if (pct >= 100 || onDeviceStatusRef.current === 'available') {
+      setDownloadProgress(null);
+      return;
+    }
+    setDownloadProgress(pct);
+    setOnDeviceStatus('downloading');
+  }, []);
+
   const persistSession = useCallback((nextSession: LectureSession) => {
     setSession(nextSession);
-    void saveSession(nextSession).then(() =>
-      listSavedSessions().then(setSavedSessions),
-    );
+    void saveSession(nextSession).then(async () => {
+      const [all, usage] = await Promise.all([
+        listSavedSessions(),
+        getStorageUsageSummary(),
+      ]);
+      setSavedSessions(all);
+      setStorageUsage(usage);
+    });
   }, []);
 
   const handleSelectSavedSession = (target: LectureSession) => {
     setSession(target);
+    setSelectedChunkId(ALL_CHAPTERS_ID);
     setLibraryOpen(false);
     setErrorState(null);
-    setStatusBanner(`Loaded "${target.content.title}" from offline library.`);
+    setStatusBanner(`Loaded "${target.content.title}" from local study history.`);
     void saveSession(target);
   };
 
   const handleDeleteSavedSession = async (sourceId: string) => {
     await deleteSession(sourceId);
-    const remaining = await listSavedSessions();
+    const [remaining, usage] = await Promise.all([
+      listSavedSessions(),
+      getStorageUsageSummary(),
+    ]);
     setSavedSessions(remaining);
+    setStorageUsage(usage);
     if (session?.sourceId === sourceId) {
       setSession(remaining[0] ?? null);
+      setSelectedChunkId(ALL_CHAPTERS_ID);
     }
   };
 
   const updatePolicy = (nextPolicy: HybridRoutingPolicy) => {
     setPolicy(nextPolicy);
     setErrorState(null);
-    void savePreferences({ policy: nextPolicy, theme });
+    void savePreferences({
+      policy: nextPolicy,
+      theme,
+      autoGenerateOnCapture,
+    });
   };
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    void savePreferences({ policy, theme: nextTheme });
+    void savePreferences({
+      policy,
+      theme: nextTheme,
+      autoGenerateOnCapture,
+    });
+  };
+
+  const toggleAutoGenerate = (enabled: boolean) => {
+    setAutoGenerateOnCapture(enabled);
+    void savePreferences({
+      policy,
+      theme,
+      autoGenerateOnCapture: enabled,
+    });
   };
 
   const chunks = useMemo(() => {
@@ -341,13 +403,20 @@ export default function App() {
   }, [session?.content.segments]);
 
   useEffect(() => {
-    if (chunks.length > 0 && !chunks.some((c) => c.id === selectedChunkId)) {
-      setSelectedChunkId(chunks[0].id);
+    if (
+      selectedChunkId !== ALL_CHAPTERS_ID &&
+      chunks.length > 0 &&
+      !chunks.some((c) => c.id === selectedChunkId)
+    ) {
+      setSelectedChunkId(ALL_CHAPTERS_ID);
     }
   }, [chunks, selectedChunkId]);
 
   const activeChunk = useMemo(
-    () => chunks.find((c) => c.id === selectedChunkId) ?? chunks[0],
+    () =>
+      selectedChunkId === ALL_CHAPTERS_ID
+        ? undefined
+        : chunks.find((c) => c.id === selectedChunkId),
     [chunks, selectedChunkId],
   );
 
@@ -357,10 +426,201 @@ export default function App() {
     [fullText],
   );
 
-  // For Notes & Flashcards, use the selected <=6,000 char chunk when segmented
-  const localWindowText = activeChunk ? activeChunk.text : fullText;
+  const filteredNotes = useMemo(() => {
+    if (!session?.notes) return undefined;
+    if (!activeChunk) return session.notes;
+    return {
+      ...session.notes,
+      takeaways: filterItemsByChunk(
+        session.notes.takeaways,
+        chunks,
+        selectedChunkId,
+      ),
+      definitions: filterItemsByChunk(
+        session.notes.definitions,
+        chunks,
+        selectedChunkId,
+      ),
+    };
+  }, [activeChunk, chunks, selectedChunkId, session?.notes]);
+
+  const filteredFlashcards = useMemo(() => {
+    if (!session?.flashcards) return undefined;
+    if (!activeChunk) return session.flashcards;
+    return {
+      cards: filterItemsByChunk(
+        session.flashcards.cards,
+        chunks,
+        selectedChunkId,
+      ),
+    };
+  }, [activeChunk, chunks, selectedChunkId, session?.flashcards]);
+
+  const filteredQuiz = useMemo(() => {
+    if (!session?.quiz) return undefined;
+    if (!activeChunk) return session.quiz;
+    return {
+      questions: filterItemsByChunk(
+        session.quiz.questions,
+        chunks,
+        selectedChunkId,
+      ),
+    };
+  }, [activeChunk, chunks, selectedChunkId, session?.quiz]);
+
+  const handleCancelGeneration = () => {
+    abortControllerRef.current?.abort();
+  };
+
+  const runAutoStudyPipeline = async (initialSession: LectureSession) => {
+    const stages: PipelineStage[] = [];
+    if (!initialSession.notes) stages.push('notes');
+    if (!initialSession.flashcards?.cards.length) stages.push('flashcards');
+    if (
+      !initialSession.quiz?.questions.length &&
+      policy === 'hybrid' &&
+      isOnline
+    ) {
+      stages.push('quiz');
+    }
+
+    if (stages.length === 0) return;
+
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    let latestSession = initialSession;
+    const sessionChunks = chunkTranscriptSegments(
+      latestSession.content.segments,
+    );
+
+    setErrorState(null);
+    setStatusBanner(null);
+
+    try {
+      for (let i = 0; i < stages.length; i++) {
+        if (controller.signal.aborted) {
+          throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+        }
+
+        const stage = stages[i];
+        setLoadingTask(stage);
+        setDownloadProgress(null);
+        setPipelineProgress({
+          stage,
+          stageIndex: i + 1,
+          totalStages: stages.length,
+        });
+
+        if (stage === 'notes') {
+          const { data, telemetry } = await extractFullLectureStudyNotes(
+            sessionChunks,
+            latestSession.content.rawText,
+            policy,
+            {
+              signal: controller.signal,
+              onDownloadProgress: handleModelDownloadProgress,
+              onChapterProgress: (chapterIndex, totalChapters, chapterLabel) =>
+                setPipelineProgress({
+                  stage: 'notes',
+                  stageIndex: i + 1,
+                  totalStages: stages.length,
+                  chapterIndex,
+                  totalChapters,
+                  chapterLabel,
+                }),
+            },
+          );
+          if (telemetry.source === 'ON_DEVICE') {
+            setOnDeviceStatus('available');
+          }
+          latestSession = {
+            ...latestSession,
+            notes: data,
+            ...recordTelemetry(latestSession, telemetry),
+            updatedAt: Date.now(),
+          };
+          persistSession(latestSession);
+        } else if (stage === 'flashcards') {
+          const { data, telemetry } = await generateFullLectureFlashcards(
+            sessionChunks,
+            latestSession.content.rawText,
+            policy,
+            {
+              signal: controller.signal,
+              onDownloadProgress: handleModelDownloadProgress,
+              onChapterProgress: (chapterIndex, totalChapters, chapterLabel) =>
+                setPipelineProgress({
+                  stage: 'flashcards',
+                  stageIndex: i + 1,
+                  totalStages: stages.length,
+                  chapterIndex,
+                  totalChapters,
+                  chapterLabel,
+                }),
+            },
+          );
+          if (telemetry.source === 'ON_DEVICE') {
+            setOnDeviceStatus('available');
+          }
+          latestSession = {
+            ...latestSession,
+            flashcards: data,
+            masteredCardIds: [],
+            ...recordTelemetry(latestSession, telemetry),
+            updatedAt: Date.now(),
+          };
+          persistSession(latestSession);
+        } else if (stage === 'quiz') {
+          const { data, telemetry } = await generatePracticeQuiz(
+            latestSession.content.rawText,
+            { signal: controller.signal },
+          );
+          latestSession = {
+            ...latestSession,
+            quiz: data,
+            quizAnswers: {},
+            ...recordTelemetry(latestSession, telemetry),
+            updatedAt: Date.now(),
+          };
+          persistSession(latestSession);
+        }
+      }
+
+      const takeawaysCount = latestSession.notes?.takeaways.length ?? 0;
+      const cardsCount = latestSession.flashcards?.cards.length ?? 0;
+      const quizNote = latestSession.quiz
+        ? `, ${latestSession.quiz.questions.length} quiz questions`
+        : policy === 'local-only'
+          ? ' (Cloud Quiz skipped in Local-Only mode)'
+          : !isOnline
+            ? ' (Cloud Quiz skipped offline)'
+            : '';
+
+      setStatusBanner(
+        `Study kit ready: ${takeawaysCount} takeaways, ${cardsCount} flashcards${quizNote}.`,
+      );
+    } catch (error) {
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner(
+          'Generation cancelled — any completed sections were saved.',
+        );
+      } else {
+        handleAiError(error);
+      }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      setLoadingTask(null);
+      setPipelineProgress(null);
+      setDownloadProgress(null);
+    }
+  };
 
   const activateContent = async (content: CapturedContent) => {
+    setSelectedChunkId(ALL_CHAPTERS_ID);
     const existing = await loadSession(content.sourceId);
     if (existing) {
       const refreshed: LectureSession = {
@@ -369,188 +629,45 @@ export default function App() {
         updatedAt: Date.now(),
       };
       persistSession(refreshed);
-      setStatusBanner('Restored saved study session from offline storage.');
+
+      const hasNotes = Boolean(refreshed.notes);
+      const hasCards = Boolean(refreshed.flashcards?.cards.length);
+      const hasQuizOrNotNeeded =
+        Boolean(refreshed.quiz?.questions.length) ||
+        policy !== 'hybrid' ||
+        !isOnline;
+
+      if (hasNotes && hasCards && hasQuizOrNotNeeded) {
+        setStatusBanner('Restored saved study session from offline storage.');
+        return;
+      }
+
+      if (autoGenerateOnCapture) {
+        await runAutoStudyPipeline(refreshed);
+      } else {
+        setStatusBanner('Restored saved study session from offline storage.');
+      }
       return;
     }
 
-    persistSession(createEmptySession(content));
+    const freshSession = createEmptySession(content);
+    persistSession(freshSession);
     setStatusBanner(null);
+
+    if (autoGenerateOnCapture) {
+      await runAutoStudyPipeline(freshSession);
+    }
   };
 
   const handleCaptureYouTube = async () => {
+    abortControllerRef.current?.abort();
     setErrorState(null);
     setStatusBanner(null);
     setCapturing(true);
 
+    let capturedContent: CapturedContent | null = null;
     try {
-      const tab = await getActiveTab();
-      if (!tab?.id) {
-        setErrorState({
-          message: 'No active browser tab detected.',
-          hint: 'Focus a YouTube video tab or paste study text below.',
-        });
-        return;
-      }
-
-      const sendCapture = async (tabId: number) =>
-        (await chrome.tabs.sendMessage(tabId, {
-          type: 'CAPTURE_TRANSCRIPT',
-        })) as CaptureTranscriptResponse;
-
-      let response: CaptureTranscriptResponse;
-      try {
-        response = await sendCapture(tab.id);
-      } catch {
-        // Fallback for tabs open before extension reload: run self-contained DOM extractor
-        if (!tab.url?.includes('youtube.com')) {
-          throw new Error(
-            'Navigate to a youtube.com/watch?v=... tab or use Paste / Selected Text below.',
-          );
-        }
-
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: async () => {
-            const url = window.location.href;
-            const parsedUrl = new URL(url);
-            const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-            const videoId =
-              parsedUrl.searchParams.get('v') ||
-              (['shorts', 'live', 'embed'].includes(pathParts[0])
-                ? pathParts[1]
-                : '');
-            if (!videoId) {
-              return {
-                ok: false as const,
-                error:
-                  'Open a YouTube video watch page (youtube.com/watch?v=...) to capture a transcript.',
-              };
-            }
-
-            const title =
-              document
-                .querySelector<HTMLElement>(
-                  'h1.ytd-watch-metadata yt-formatted-string, h1.title yt-formatted-string',
-                )
-                ?.textContent?.trim() ||
-              document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim() ||
-              'YouTube Lecture';
-
-            const readDomRows = () => {
-              const rows: Array<{ timestampText: string; bodyText: string }> = [];
-              document
-                .querySelectorAll('transcript-segment-view-model')
-                .forEach((node) => {
-                  const timeEl = node.querySelector(
-                    '.ytwTranscriptSegmentViewModelTimestamp, [class*="timestamp" i], [class*="Timestamp"]',
-                  );
-                  const textEl = node.querySelector(
-                    '.ytwTranscriptSegmentViewModelText, yt-formatted-string, [class*="text" i], [class*="Text"]',
-                  );
-                  const timestampText = timeEl?.textContent?.trim() ?? '';
-                  const bodyText =
-                    textEl && textEl !== timeEl
-                      ? textEl.textContent ?? ''
-                      : node.textContent ?? '';
-                  if (bodyText.trim()) {
-                    rows.push({ timestampText, bodyText });
-                  }
-                });
-
-              if (rows.length > 0) return rows;
-
-              document
-                .querySelectorAll('ytd-transcript-segment-renderer')
-                .forEach((node) => {
-                  const timestampText =
-                    node.querySelector('.segment-timestamp')?.textContent?.trim() ??
-                    '';
-                  const bodyText =
-                    node.querySelector('.segment-text')?.textContent ?? '';
-                  if (bodyText.trim()) {
-                    rows.push({ timestampText, bodyText });
-                  }
-                });
-
-              return rows;
-            };
-
-            let rows = readDomRows();
-            if (rows.length === 0) {
-              const findTranscriptBtn = () =>
-                document.querySelector<HTMLElement>(
-                  'ytd-video-description-transcript-section-renderer button, button[aria-label*="transcript" i]',
-                ) ??
-                Array.from(document.querySelectorAll<HTMLElement>('button')).find(
-                  (btn) =>
-                    /show\s+transcript/i.test(btn.textContent ?? '') ||
-                    /transcript/i.test(btn.getAttribute('aria-label') ?? ''),
-                ) ??
-                null;
-
-              let transcriptBtn = findTranscriptBtn();
-              if (!transcriptBtn) {
-                const expandBtn = document.querySelector<HTMLElement>(
-                  'tp-yt-paper-button#expand, #description-inline-expander #expand, #expand',
-                );
-                if (expandBtn) {
-                  expandBtn.click();
-                  await new Promise((r) => setTimeout(r, 300));
-                  transcriptBtn = findTranscriptBtn();
-                }
-              }
-
-              if (transcriptBtn) {
-                transcriptBtn.click();
-                const deadline = Date.now() + 4500;
-                while (Date.now() < deadline) {
-                  await new Promise((r) => setTimeout(r, 150));
-                  rows = readDomRows();
-                  if (rows.length > 0) break;
-                }
-              }
-            }
-
-            return {
-              ok: true as const,
-              videoId,
-              title,
-              url,
-              rows,
-            };
-          },
-        });
-
-        const payload = results[0]?.result;
-        if (!payload || !payload.ok) {
-          response = {
-            ok: false,
-            error:
-              payload?.error ||
-              'Could not extract transcript from this YouTube tab.',
-          };
-        } else {
-          const parsedRows = payload.rows
-            .map((r) => parseTranscriptDomRow(r.timestampText, r.bodyText))
-            .filter((seg): seg is NonNullable<typeof seg> => seg !== null);
-          const segments = mergeCaptionSegments(parsedRows);
-          response =
-            segments.length > 0
-              ? {
-                  ok: true,
-                  videoId: payload.videoId,
-                  title: payload.title,
-                  url: payload.url,
-                  segments,
-                }
-              : {
-                  ok: false,
-                  error:
-                    'No transcript segments were found. Scroll down on YouTube, click "Show transcript", and try again—or paste text below.',
-                };
-        }
-      }
-
+      const response = await captureYouTubeFromActiveTab();
       if (!response.ok) {
         setErrorState({
           message: response.error,
@@ -560,7 +677,7 @@ export default function App() {
       }
 
       const rawText = formatSegmentsAsTranscript(response.segments);
-      await activateContent({
+      capturedContent = {
         sourceId: `yt:${response.videoId}`,
         sourceType: 'youtube',
         title: response.title,
@@ -568,7 +685,7 @@ export default function App() {
         segments: response.segments,
         rawText,
         capturedAt: Date.now(),
-      });
+      };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setErrorState({
@@ -578,53 +695,38 @@ export default function App() {
     } finally {
       setCapturing(false);
     }
+
+    if (capturedContent) {
+      await activateContent(capturedContent);
+    }
   };
 
   const handleGrabSelection = async () => {
     setErrorState(null);
-    try {
-      const tab = await getActiveTab();
-      if (!tab?.id) {
-        setErrorState({ message: 'No active tab to read selection from.' });
-        return;
-      }
-
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.getSelection()?.toString()?.trim() ?? '',
-      });
-
-      const selected = (results[0]?.result as string | undefined) ?? '';
-      if (!selected) {
-        setErrorState({
-          message: 'No highlighted text found on the active page.',
-          hint: 'Highlight an article paragraph on the page first, or paste text directly.',
-        });
-        return;
-      }
-
-      setPastedText(selected);
-      if (!pastedTitle && tab.title) {
-        setPastedTitle(tab.title);
-      }
-      setPasteDrawerOpen(true);
-
-      await activateContent({
-        sourceId: `article:${hashText(selected)}`,
-        sourceType: 'article',
-        title: tab.title || 'Selected Web Excerpt',
-        url: tab.url || '',
-        segments: [],
-        rawText: selected,
-        capturedAt: Date.now(),
-      });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+    const res = await grabSelectionFromActiveTab();
+    if (!res.ok) {
       setErrorState({
-        message: 'Unable to read selection from this page.',
-        hint: msg,
+        message: res.error,
+        hint: res.hint,
       });
+      return;
     }
+
+    setPastedText(res.text);
+    if (!pastedTitle && res.title) {
+      setPastedTitle(res.title);
+    }
+    setPasteDrawerOpen(true);
+
+    await activateContent({
+      sourceId: `article:${hashText(res.text)}`,
+      sourceType: 'article',
+      title: res.title,
+      url: res.url,
+      segments: [],
+      rawText: res.text,
+      capturedAt: Date.now(),
+    });
   };
 
   const handleApplyPastedText = async () => {
@@ -644,52 +746,80 @@ export default function App() {
     setPasteDrawerOpen(false);
   };
 
-  const handleLoadSample = async () => {
-    setErrorState(null);
-    await activateContent({
-      ...SAMPLE_LECTURE_CONTENT,
-      capturedAt: Date.now(),
-    });
-    setStatusBanner('Loaded sample Hybrid AI lecture — ready to test!');
+  const handleSeekVideo = async (startSeconds: number) => {
+    const res = await seekOrOpenVideo(session?.content.url, startSeconds);
+    if (!res.ok) {
+      setStatusBanner(res.error);
+    } else if (res.action === 'opened-new-tab') {
+      setStatusBanner('Opened YouTube video at the selected timestamp.');
+    }
   };
 
-  const handleSeekVideo = async (startSeconds: number) => {
-    try {
-      const tab = await getActiveTab();
-      if (!tab?.id) return;
-
-      try {
-        const res = (await chrome.tabs.sendMessage(tab.id, {
-          type: 'SEEK_VIDEO',
-          startSeconds,
-        })) as SeekVideoResponse;
-
-        if (!res.ok) {
-          setStatusBanner(res.error);
-        }
-        return;
-      } catch {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: (sec: number) => {
-            const video = document.querySelector<HTMLVideoElement>('video');
-            if (!video) return false;
-            video.currentTime = Math.max(0, sec);
-            void video.play().catch(() => undefined);
-            return true;
-          },
-          args: [startSeconds],
-        });
-
-        if (!results[0]?.result) {
-          setStatusBanner('No active YouTube video player found on this tab.');
-        }
-      }
-    } catch {
-      setStatusBanner(
-        'Open the matching YouTube tab to seek video playback directly.',
-      );
+  const handleCaptureCurrentTime = async (): Promise<{
+    timestamp: string;
+    startSeconds: number;
+  } | null> => {
+    const res = await getCurrentYouTubeVideoTime(session?.content.url);
+    if (!res.ok) {
+      setStatusBanner(res.error);
+      return null;
     }
+    return {
+      timestamp: res.timestamp,
+      startSeconds: res.currentSeconds,
+    };
+  };
+
+  const handleAddUserNote = (
+    text: string,
+    timestamp?: string,
+    startSeconds?: number,
+  ) => {
+    if (!session) return;
+    const now = Date.now();
+    const newNote: UserNote = {
+      id: `note-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      text,
+      timestamp,
+      startSeconds,
+      createdAt: now,
+      updatedAt: now,
+    };
+    persistSession({
+      ...session,
+      userNotes: [...(session.userNotes ?? []), newNote],
+      updatedAt: now,
+    });
+  };
+
+  const handleUpdateUserNote = (
+    id: string,
+    text: string,
+    timestamp?: string,
+    startSeconds?: number,
+  ) => {
+    if (!session) return;
+    const now = Date.now();
+    const nextNotes = (session.userNotes ?? []).map((note) =>
+      note.id === id
+        ? { ...note, text, timestamp, startSeconds, updatedAt: now }
+        : note,
+    );
+    persistSession({
+      ...session,
+      userNotes: nextNotes,
+      updatedAt: now,
+    });
+  };
+
+  const handleDeleteUserNote = (id: string) => {
+    if (!session) return;
+    const nextNotes = (session.userNotes ?? []).filter((note) => note.id !== id);
+    persistSession({
+      ...session,
+      userNotes: nextNotes,
+      updatedAt: Date.now(),
+    });
   };
 
   const recordTelemetry = (
@@ -697,7 +827,7 @@ export default function App() {
     telemetry: InferenceTelemetry,
   ): Pick<LectureSession, 'lastTelemetry' | 'telemetryHistory'> => ({
     lastTelemetry: telemetry,
-    telemetryHistory: [telemetry, ...current.telemetryHistory].slice(0, 12),
+    telemetryHistory: [telemetry, ...current.telemetryHistory].slice(0, 50),
   });
 
   const handleAiError = (error: unknown) => {
@@ -716,18 +846,31 @@ export default function App() {
 
   const handleGenerateNotes = async () => {
     if (!session) return;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setErrorState(null);
     setDownloadProgress(null);
     setLoadingTask('notes');
+    setPipelineProgress(null);
     try {
-      const { data, telemetry } = await extractStudyNotes(
-        localWindowText,
+      const { data, telemetry } = await extractFullLectureStudyNotes(
+        chunks,
+        fullText,
         policy,
         {
-          onDownloadProgress: (pct) => {
-            setDownloadProgress(pct);
-            setOnDeviceStatus('downloading');
-          },
+          signal: controller.signal,
+          onDownloadProgress: handleModelDownloadProgress,
+          onChapterProgress: (chapterIndex, totalChapters, chapterLabel) =>
+            setPipelineProgress({
+              stage: 'notes',
+              stageIndex: 1,
+              totalStages: 1,
+              chapterIndex,
+              totalChapters,
+              chapterLabel,
+            }),
         },
       );
       if (telemetry.source === 'ON_DEVICE') {
@@ -740,27 +883,101 @@ export default function App() {
         updatedAt: Date.now(),
       });
     } catch (error) {
-      handleAiError(error);
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner('Notes generation cancelled.');
+      } else {
+        handleAiError(error);
+      }
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setLoadingTask(null);
+      setPipelineProgress(null);
+      setDownloadProgress(null);
+    }
+  };
+
+  const handleDeepDiveChapterNotes = async () => {
+    if (!session || !activeChunk) return;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setErrorState(null);
+    setDownloadProgress(null);
+    setLoadingTask('notes');
+    setPipelineProgress({
+      stage: 'notes',
+      stageIndex: 1,
+      totalStages: 1,
+      chapterIndex: 1,
+      totalChapters: 1,
+      chapterLabel: activeChunk.label,
+    });
+    try {
+      const { data, telemetry } = await extractStudyNotes(
+        activeChunk.text,
+        policy,
+        {
+          signal: controller.signal,
+          targetTakeaways: [5, 7],
+          targetDefinitions: [3, 5],
+          onDownloadProgress: handleModelDownloadProgress,
+        },
+      );
+      if (telemetry.source === 'ON_DEVICE') {
+        setOnDeviceStatus('available');
+      }
+      persistSession({
+        ...session,
+        notes: mergeStudyNotes(session.notes, data),
+        ...recordTelemetry(session, telemetry),
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner('Chapter deep-dive cancelled.');
+      } else {
+        handleAiError(error);
+      }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      setLoadingTask(null);
+      setPipelineProgress(null);
       setDownloadProgress(null);
     }
   };
 
   const handleGenerateFlashcards = async () => {
     if (!session) return;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setErrorState(null);
     setDownloadProgress(null);
     setLoadingTask('flashcards');
+    setPipelineProgress(null);
     try {
-      const { data, telemetry } = await generateFlashcards(
-        localWindowText,
+      const { data, telemetry } = await generateFullLectureFlashcards(
+        chunks,
+        fullText,
         policy,
         {
-          onDownloadProgress: (pct) => {
-            setDownloadProgress(pct);
-            setOnDeviceStatus('downloading');
-          },
+          signal: controller.signal,
+          onDownloadProgress: handleModelDownloadProgress,
+          onChapterProgress: (chapterIndex, totalChapters, chapterLabel) =>
+            setPipelineProgress({
+              stage: 'flashcards',
+              stageIndex: 1,
+              totalStages: 1,
+              chapterIndex,
+              totalChapters,
+              chapterLabel,
+            }),
         },
       );
       if (telemetry.source === 'ON_DEVICE') {
@@ -774,19 +991,87 @@ export default function App() {
         updatedAt: Date.now(),
       });
     } catch (error) {
-      handleAiError(error);
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner('Flashcards generation cancelled.');
+      } else {
+        handleAiError(error);
+      }
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setLoadingTask(null);
+      setPipelineProgress(null);
+      setDownloadProgress(null);
+    }
+  };
+
+  const handleDeepDiveChapterFlashcards = async () => {
+    if (!session || !activeChunk) return;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setErrorState(null);
+    setDownloadProgress(null);
+    setLoadingTask('flashcards');
+    setPipelineProgress({
+      stage: 'flashcards',
+      stageIndex: 1,
+      totalStages: 1,
+      chapterIndex: 1,
+      totalChapters: 1,
+      chapterLabel: activeChunk.label,
+    });
+    try {
+      const { data, telemetry } = await generateFlashcards(
+        activeChunk.text,
+        policy,
+        {
+          signal: controller.signal,
+          targetFlashcards: [5, 7],
+          idPrefix: `${activeChunk.id}-deep-`,
+          onDownloadProgress: handleModelDownloadProgress,
+        },
+      );
+      if (telemetry.source === 'ON_DEVICE') {
+        setOnDeviceStatus('available');
+      }
+      persistSession({
+        ...session,
+        flashcards: mergeFlashcards(session.flashcards, data),
+        ...recordTelemetry(session, telemetry),
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner('Chapter deep-dive cancelled.');
+      } else {
+        handleAiError(error);
+      }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      setLoadingTask(null);
+      setPipelineProgress(null);
       setDownloadProgress(null);
     }
   };
 
   const handleGenerateQuiz = async () => {
     if (!session) return;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setErrorState(null);
     setLoadingTask('quiz');
+    setPipelineProgress(null);
     try {
-      const { data, telemetry } = await generatePracticeQuiz(fullText);
+      const { data, telemetry } = await generatePracticeQuiz(fullText, {
+        signal: controller.signal,
+      });
       persistSession({
         ...session,
         quiz: data,
@@ -795,8 +1080,15 @@ export default function App() {
         updatedAt: Date.now(),
       });
     } catch (error) {
-      handleAiError(error);
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner('Quiz generation cancelled.');
+      } else {
+        handleAiError(error);
+      }
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setLoadingTask(null);
     }
   };
@@ -885,184 +1177,93 @@ export default function App() {
     setTimeout(() => setCopiedFeedback(false), 1800);
   };
 
-  const handleExportAnkiCsv = () => {
-    if (!session?.flashcards?.cards.length) return;
-    const csv = formatAnkiCsv(session.flashcards.cards);
-    const slug = (session.content.title || 'lecture')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 40);
-    downloadTextFile(`lecturelens-${slug || 'cards'}.csv`, csv);
+  const handleDownloadMarkdown = () => {
+    if (!session) return;
+    const md = formatStudyMarkdown(session);
+    downloadTextFile(
+      buildMarkdownFilename(session.content.title),
+      md,
+      'text/markdown;charset=utf-8',
+    );
   };
 
   const canExportMarkdown = Boolean(
-    session && (session.notes || session.flashcards?.cards.length),
+    session &&
+      (session.notes ||
+        session.flashcards?.cards.length ||
+        session.quiz?.questions.length ||
+        session.userNotes?.length),
   );
-  const canExportCsv = Boolean(session?.flashcards?.cards.length);
+
+  const tabOrder: ActiveTab[] = ['notes', 'flashcards', 'quiz'];
+  const handleTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    current: ActiveTab,
+  ) => {
+    const currentIdx = tabOrder.indexOf(current);
+    let nextIdx: number | null = null;
+    if (event.key === 'ArrowRight') {
+      nextIdx = (currentIdx + 1) % tabOrder.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIdx = (currentIdx - 1 + tabOrder.length) % tabOrder.length;
+    } else if (event.key === 'Home') {
+      nextIdx = 0;
+    } else if (event.key === 'End') {
+      nextIdx = tabOrder.length - 1;
+    }
+
+    if (nextIdx !== null) {
+      event.preventDefault();
+      const nextTab = tabOrder[nextIdx];
+      setActiveTab(nextTab);
+      tabRefs.current[nextTab]?.focus();
+    }
+  };
 
   return (
     <div
       onClickCapture={handleFirstClickPrewarm}
       className="flex min-h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
     >
-      {/* Header Bar */}
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-3.5 py-2.5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-xs">
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div>
-              <h1 className="text-sm font-bold tracking-tight">LectureLens AI</h1>
-            </div>
-          </div>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-indigo-600 focus:px-3 focus:py-1.5 text-xs font-semibold text-white shadow-lg"
+      >
+        Skip to main content
+      </a>
 
-          <div className="flex items-center gap-1.5">
-            {/* Hybrid vs Local-Only Toggle Pill */}
-            <div
-              className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-0.5 text-[11px] font-semibold dark:border-slate-700 dark:bg-slate-900"
-              role="group"
-              aria-label="Hybrid routing policy"
-            >
-              <button
-                type="button"
-                onClick={() => updatePolicy('hybrid')}
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition ${
-                  policy === 'hybrid'
-                    ? 'bg-white text-indigo-600 shadow-xs dark:bg-slate-800 dark:text-indigo-300'
-                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-                }`}
-                title="Prefer Gemini Nano on-device with automatic Cloud Gemini 3.8 Flash fallback"
-              >
-                <Zap className="h-2.5 w-2.5" />
-                Hybrid
-              </button>
-              <button
-                type="button"
-                onClick={() => updatePolicy('local-only')}
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition ${
-                  policy === 'local-only'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-                }`}
-                title="Strict Local-Only (Offline Privacy) — ONLY_ON_DEVICE"
-              >
-                <ShieldCheck className="h-2.5 w-2.5" />
-                Local-Only
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-              title="Toggle light/dark theme"
-              aria-label="Toggle theme"
-            >
-              {theme === 'dark' ? (
-                <Sun className="h-3.5 w-3.5" />
-              ) : (
-                <Moon className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Live Telemetry & Inference Source Row */}
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5">
-          <InferenceBadge
-            telemetry={session?.lastTelemetry}
-            history={session?.telemetryHistory ?? []}
-            onDeviceStatus={onDeviceStatus}
-            policy={policy}
-            downloadProgress={downloadProgress}
-            isOnline={isOnline}
-          />
-          <div className="flex items-center gap-1.5">
-            {savedSessions.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setLibraryOpen((prev) => !prev)}
-                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                title="Browse saved offline lecture sessions"
-              >
-                <FolderOpen className="h-2.5 w-2.5 text-indigo-500" />
-                Library ({savedSessions.length})
-              </button>
-            ) : (
-              session && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
-                  <HardDrive className="h-2.5 w-2.5" />
-                  Saved
-                </span>
-              )
-            )}
-          </div>
-        </div>
-      </header>
+      <HeaderBar
+        policy={policy}
+        theme={theme}
+        onDeviceStatus={onDeviceStatus}
+        isOnline={isOnline}
+        downloadProgress={downloadProgress}
+        session={session}
+        savedSessionCount={savedSessions.length}
+        libraryOpen={libraryOpen}
+        helpOpen={helpOpen}
+        onChangePolicy={updatePolicy}
+        onToggleTheme={toggleTheme}
+        onToggleLibrary={() => setLibraryOpen((prev) => !prev)}
+        onOpenHelp={() => setHelpOpen(true)}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 space-y-3.5 p-3.5">
-        {libraryOpen && savedSessions.length > 0 && (
-          <section className="space-y-2 rounded-2xl border border-indigo-500/30 bg-white p-3 shadow-sm dark:border-indigo-500/30 dark:bg-slate-900">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[11px] font-semibold tracking-wider text-indigo-600 uppercase dark:text-indigo-400">
-                Offline Study Library
-              </h2>
-              <button
-                type="button"
-                onClick={() => setLibraryOpen(false)}
-                className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                Close
-              </button>
-            </div>
-            <ul className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
-              {savedSessions.map((item) => {
-                const isActive = item.sourceId === session?.sourceId;
-                const totalCards = item.flashcards?.cards.length ?? 0;
-                const mastered = item.masteredCardIds.length;
-                return (
-                  <li
-                    key={item.sourceId}
-                    className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-xs ${
-                      isActive
-                        ? 'border-indigo-500/40 bg-indigo-500/10'
-                        : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/60'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleSelectSavedSession(item)}
-                      className="min-w-0 flex-1 text-left"
-                    >
-                      <p className="truncate font-semibold text-slate-800 dark:text-slate-100">
-                        {item.content.title}
-                      </p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                        {item.notes ? 'Notes' : 'No notes'}
-                        {totalCards > 0
-                          ? ` • ${mastered}/${totalCards} cards`
-                          : ''}
-                        {item.quiz ? ' • Quiz ready' : ''}
-                      </p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteSavedSession(item.sourceId)}
-                      className="rounded-lg p-1 text-slate-400 hover:bg-rose-500/10 hover:text-rose-500"
-                      title="Delete saved session"
-                      aria-label={`Delete ${item.content.title}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
+      <main
+        id="main-content"
+        className="mx-auto w-full max-w-2xl flex-1 space-y-3.5 p-3.5"
+      >
+        <HistoryDrawer
+          open={libraryOpen}
+          sessions={savedSessions}
+          activeSourceId={session?.sourceId}
+          storageUsage={storageUsage}
+          onSelectSession={handleSelectSavedSession}
+          onDeleteSession={(id) => void handleDeleteSavedSession(id)}
+          onOpenUrl={(url) => void handleOpenSourceUrl(url)}
+          onClose={() => setLibraryOpen(false)}
+        />
+
         {!firebaseReady && !dismissedSetupBanner && (
           <div className="flex items-start justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-800 dark:text-amber-200">
             <div>
@@ -1081,419 +1282,220 @@ export default function App() {
           </div>
         )}
 
-        {/* Content Capture Card */}
-        <section className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={capturing}
-              onClick={handleCaptureYouTube}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-rose-500 disabled:opacity-50"
+        <CaptureCard
+          session={session}
+          capturing={capturing}
+          autoGenerateOnCapture={autoGenerateOnCapture}
+          windowAnalysis={windowAnalysis}
+          chunks={chunks}
+          activeChunkId={selectedChunkId}
+          pasteDrawerOpen={pasteDrawerOpen}
+          pastedTitle={pastedTitle}
+          pastedText={pastedText}
+          onCaptureYouTube={() => void handleCaptureYouTube()}
+          onToggleAutoGenerate={toggleAutoGenerate}
+          onTogglePasteDrawer={() => setPasteDrawerOpen((prev) => !prev)}
+          onChangePastedTitle={setPastedTitle}
+          onChangePastedText={setPastedText}
+          onGrabSelection={() => void handleGrabSelection()}
+          onApplyPastedText={() => void handleApplyPastedText()}
+          onSelectChunk={setSelectedChunkId}
+          onOpenSourceUrl={(url) => void handleOpenSourceUrl(url)}
+        />
+
+        <StatusAlerts
+          loadingTask={loadingTask}
+          pipelineProgress={pipelineProgress}
+          downloadingNano={downloadingNano}
+          downloadProgress={downloadProgress}
+          elapsedMs={elapsedMs}
+          onDeviceStatus={onDeviceStatus}
+          policy={policy}
+          statusBanner={statusBanner}
+          errorState={errorState}
+          onDownloadNano={() => void handleDownloadNano()}
+          onSwitchToHybrid={() => updatePolicy('hybrid')}
+          onRecheckOrDownloadNano={() => void handleRecheckOrDownloadNano()}
+          onOpenChromePage={(url) => void handleOpenChromePage(url)}
+          onCancelGeneration={handleCancelGeneration}
+        />
+
+        {session ? (
+          (() => {
+            const isYouTubeSource =
+              session.content.sourceType === 'youtube' ||
+              isYouTubeUrl(session.content.url);
+
+            return (
+              <>
+            {/* Tabs Navigation (WAI-ARIA Tabs Pattern) */}
+            <div
+              role="tablist"
+              aria-label="Study workspace"
+              className="mx-auto grid w-full max-w-md grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900"
             >
-              <Youtube className="h-4 w-4" />
-              <span>
-                {capturing ? 'Capturing...' : 'Capture YouTube Transcript'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleLoadSample}
-              className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              title="Load a built-in sample lecture for instant testing"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
-              Sample
-            </button>
-          </div>
-
-          {/* Collapsible Paste / Selected Text Drawer */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setPasteDrawerOpen((prev) => !prev)}
-              className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5" />
-                Paste / Selected Text
-              </span>
-              {pasteDrawerOpen ? (
-                <ChevronUp className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
-              )}
-            </button>
-
-            {pasteDrawerOpen && (
-              <div className="mt-2 space-y-2 border-t border-slate-100 pt-2 dark:border-slate-800">
-                <input
-                  type="text"
-                  value={pastedTitle}
-                  onChange={(e) => setPastedTitle(e.target.value)}
-                  placeholder="Optional title (e.g., Distributed Systems Notes)"
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800"
-                />
-                <textarea
-                  rows={4}
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  placeholder="Paste lecture transcript, documentation, or article text..."
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleGrabSelection}
-                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    Grab Page Selection
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!pastedText.trim()}
-                    onClick={handleApplyPastedText}
-                    className="flex-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
-                  >
-                    Use Pasted Text
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Captured Content Summary & Window Indicator */}
-          {session ? (
-            <div className="space-y-2 rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/60">
-              <div className="flex items-start justify-between gap-2">
-                <p className="line-clamp-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
-                  {session.content.title}
-                </p>
-                <span className="shrink-0 rounded-md bg-slate-200/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                  {windowAnalysis.charCount.toLocaleString()} chars
-                </span>
-              </div>
-
-              <p
-                className={`text-[11px] font-medium ${
-                  windowAnalysis.fitsOnDevice
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : 'text-sky-600 dark:text-sky-400'
+              <button
+                ref={(el) => {
+                  tabRefs.current.notes = el;
+                }}
+                id="tab-notes"
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'notes'}
+                aria-controls="panel-notes"
+                tabIndex={activeTab === 'notes' ? 0 : -1}
+                onClick={() => setActiveTab('notes')}
+                onKeyDown={(e) => handleTabKeyDown(e, 'notes')}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
+                  activeTab === 'notes'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
                 }`}
               >
-                {windowAnalysis.hint}
-              </p>
-
-              {chunks.length > 1 && (
-                <div className="flex items-center justify-between gap-2 border-t border-slate-200/70 pt-2 dark:border-slate-700">
-                  <label
-                    htmlFor="chapter-chunk-select"
-                    className="text-[11px] font-medium text-slate-600 dark:text-slate-300"
-                  >
-                    Nano Chapter:
-                  </label>
-                  <select
-                    id="chapter-chunk-select"
-                    value={activeChunk?.id ?? ''}
-                    onChange={(e) => setSelectedChunkId(e.target.value)}
-                    className="max-w-[205px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                  >
-                    {chunks.map((chunk) => (
-                      <option key={chunk.id} value={chunk.id}>
-                        {chunk.label} • {chunk.charCount}ch
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                Notes
+              </button>
+              <button
+                ref={(el) => {
+                  tabRefs.current.flashcards = el;
+                }}
+                id="tab-flashcards"
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'flashcards'}
+                aria-controls="panel-flashcards"
+                tabIndex={activeTab === 'flashcards' ? 0 : -1}
+                onClick={() => setActiveTab('flashcards')}
+                onKeyDown={(e) => handleTabKeyDown(e, 'flashcards')}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
+                  activeTab === 'flashcards'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+                Flashcards
+              </button>
+              <button
+                ref={(el) => {
+                  tabRefs.current.quiz = el;
+                }}
+                id="tab-quiz"
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'quiz'}
+                aria-controls="panel-quiz"
+                tabIndex={activeTab === 'quiz' ? 0 : -1}
+                onClick={() => setActiveTab('quiz')}
+                onKeyDown={(e) => handleTabKeyDown(e, 'quiz')}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
+                  activeTab === 'quiz'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                }`}
+              >
+                <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                Quiz
+              </button>
             </div>
-          ) : (
-            <p className="text-center text-[11px] text-slate-500 dark:text-slate-400">
-              Open a YouTube lecture or click <strong>Sample</strong> to explore hybrid
-              on-device + cloud studying.
-            </p>
-          )}
-        </section>
 
-        {/* Live Execution / Download Progress Card */}
-        {(loadingTask !== null || downloadingNano) && (() => {
-          const isNanoDl = downloadProgress !== null;
-          const execProgress = computeExecutionProgress(
-            elapsedMs,
-            loadingTask === 'quiz' ? 6500 : 4000,
-          );
-          const currentPct = isNanoDl ? downloadProgress : execProgress.percent;
-          const taskTitle = isNanoDl
-            ? 'Downloading Gemini Nano'
-            : loadingTask === 'notes'
-              ? 'Extracting Study Notes'
-              : loadingTask === 'flashcards'
-                ? 'Creating Flashcards'
-                : 'Generating Cloud Quiz';
-
-          return (
-            <div className="space-y-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-3 text-xs">
-              <div className="flex items-center justify-between gap-2 font-semibold text-indigo-800 dark:text-indigo-200">
-                <span>{taskTitle}</span>
-                <span className="font-mono text-[11px]">{currentPct}%</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-indigo-200/70 dark:bg-slate-800">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-150"
-                  style={{ width: `${currentPct}%` }}
+            {/* Active Tab Panel */}
+            <div
+              id={`panel-${activeTab}`}
+              role="tabpanel"
+              aria-labelledby={`tab-${activeTab}`}
+              tabIndex={0}
+              className="focus:outline-none"
+            >
+              {activeTab === 'notes' && (
+                <NotesTab
+                  notes={filteredNotes}
+                  userNotes={session.userNotes ?? []}
+                  isYouTubeSource={isYouTubeSource}
+                  hasContent={Boolean(session)}
+                  isLoading={loadingTask === 'notes'}
+                  policy={policy}
+                  explanations={session.explanations}
+                  explainingKey={explainingKey}
+                  activeChapterLabel={activeChunk?.label}
+                  totalTakeawaysCount={session.notes?.takeaways.length}
+                  onGenerate={() => void handleGenerateNotes()}
+                  onDeepDiveChapter={
+                    activeChunk
+                      ? () => void handleDeepDiveChapterNotes()
+                      : undefined
+                  }
+                  onSeekVideo={(sec) => void handleSeekVideo(sec)}
+                  onExplainConcept={(k, c, ctx) =>
+                    void handleExplainConcept(k, c, ctx)
+                  }
+                  onAddUserNote={handleAddUserNote}
+                  onUpdateUserNote={handleUpdateUserNote}
+                  onDeleteUserNote={handleDeleteUserNote}
+                  onCaptureCurrentTime={handleCaptureCurrentTime}
                 />
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-indigo-700/80 dark:text-indigo-300/80">
-                <span>
-                  {isNanoDl
-                    ? 'One-time Chrome on-device model download'
-                    : policy === 'local-only' && loadingTask !== 'quiz'
-                      ? 'Running on-device (Local-Only)'
-                      : 'Running via Firebase AI Logic'}
-                </span>
-                <span className="font-mono">{formatLatency(elapsedMs)} elapsed</span>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Status or Error Alerts */}
-        {(onDeviceStatus === 'downloadable' ||
-          (onDeviceStatus === 'downloading' && !downloadingNano)) && (
-          <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-800 dark:text-amber-200">
-            <p className="font-semibold">
-              {onDeviceStatus === 'downloading'
-                ? 'Chrome is downloading Gemini Nano in the background'
-                : 'Gemini Nano is ready to download (~1.7 GB)'}
-              {typeof downloadProgress === 'number'
-                ? ` (${downloadProgress}%)`
-                : ''}
-            </p>
-            <p className="leading-relaxed opacity-90">
-              {policy === 'local-only'
-                ? 'Local-Only mode is active (default). Track live download % below, or switch to Hybrid for Cloud fallback anytime.'
-                : 'Hybrid mode will automatically use Cloud fallback until Nano finishes downloading.'}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {!loadingTask && (
-                <button
-                  type="button"
-                  onClick={handleDownloadNano}
-                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-500"
-                >
-                  <Download className="h-3 w-3" />
-                  Track / Download Gemini Nano
-                </button>
               )}
-              {policy === 'local-only' && (
-                <button
-                  type="button"
-                  onClick={() => updatePolicy('hybrid')}
-                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500"
-                >
-                  <Zap className="h-3 w-3" />
-                  Switch to Hybrid
-                </button>
+
+              {activeTab === 'flashcards' && (
+                <FlashcardsTab
+                  flashcards={filteredFlashcards}
+                  masteredCardIds={session.masteredCardIds}
+                  isYouTubeSource={isYouTubeSource}
+                  hasContent={Boolean(session)}
+                  isLoading={loadingTask === 'flashcards'}
+                  policy={policy}
+                  activeChapterLabel={activeChunk?.label}
+                  totalCardsCount={session.flashcards?.cards.length}
+                  onGenerate={() => void handleGenerateFlashcards()}
+                  onDeepDiveChapter={
+                    activeChunk
+                      ? () => void handleDeepDiveChapterFlashcards()
+                      : undefined
+                  }
+                  onToggleMastered={handleToggleMastered}
+                  onResetMastered={handleResetMastered}
+                  onSeekVideo={(sec) => void handleSeekVideo(sec)}
+                />
+              )}
+
+              {activeTab === 'quiz' && (
+                <QuizTab
+                  quiz={filteredQuiz}
+                  answers={session.quizAnswers}
+                  isYouTubeSource={isYouTubeSource}
+                  hasContent={Boolean(session)}
+                  isLoading={loadingTask === 'quiz'}
+                  policy={policy}
+                  explanations={session.explanations}
+                  explainingKey={explainingKey}
+                  activeChapterLabel={activeChunk?.label}
+                  totalQuestionsCount={session.quiz?.questions.length}
+                  onGenerate={() => void handleGenerateQuiz()}
+                  onSelectAnswer={handleSelectQuizAnswer}
+                  onResetQuiz={handleResetQuiz}
+                  onSeekVideo={(sec) => void handleSeekVideo(sec)}
+                  onExplainConcept={(k, c, ctx) =>
+                    void handleExplainConcept(k, c, ctx)
+                  }
+                />
               )}
             </div>
-          </div>
-        )}
-
-        {statusBanner && (
-          <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/10 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-200">
-            {statusBanner}
-          </div>
-        )}
-
-        {errorState && (
-          <div className="space-y-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-800 dark:text-rose-200">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
-              <div className="space-y-1">
-                <p className="font-semibold">{errorState.message}</p>
-                {errorState.hint && (
-                  <p className="text-[11px] leading-relaxed opacity-90">
-                    {errorState.hint}
-                  </p>
-                )}
-              </div>
-            </div>
-            {errorState.code === 'ON_DEVICE_UNAVAILABLE' && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => updatePolicy('hybrid')}
-                  className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-rose-500"
-                >
-                  <Zap className="h-3 w-3" />
-                  Switch to Hybrid (Auto Cloud Fallback)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleRecheckOrDownloadNano()}
-                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-500"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  Check / Download Nano
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    openChromePage(
-                      'chrome://flags/#optimization-guide-on-device-model',
-                    )
-                  }
-                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-white/80 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-white dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-slate-800"
-                >
-                  <ExternalLink className="h-2.5 w-2.5" />
-                  1. Model Flag
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    openChromePage('chrome://flags/#prompt-api-for-gemini-nano')
-                  }
-                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-white/80 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-white dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-slate-800"
-                >
-                  <ExternalLink className="h-2.5 w-2.5" />
-                  2. Prompt API Flag
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openChromePage('chrome://components')}
-                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-white/80 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-white dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-slate-800"
-                >
-                  <ExternalLink className="h-2.5 w-2.5" />
-                  3. Components
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tabs Navigation */}
-        <nav
-          className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900"
-          aria-label="Study workspace tabs"
-        >
-          <button
-            type="button"
-            onClick={() => setActiveTab('notes')}
-            className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
-              activeTab === 'notes'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <BookOpen className="h-3.5 w-3.5" />
-            Notes
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('flashcards')}
-            className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
-              activeTab === 'flashcards'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Flashcards
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('quiz')}
-            className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
-              activeTab === 'quiz'
-                ? 'bg-sky-600 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <HelpCircle className="h-3.5 w-3.5" />
-            Quiz
-          </button>
-        </nav>
-
-        {/* Active Tab View */}
-        {activeTab === 'notes' && (
-          <NotesTab
-            notes={session?.notes}
-            hasContent={Boolean(session)}
-            isLoading={loadingTask === 'notes'}
-            policy={policy}
-            explanations={session?.explanations}
-            explainingKey={explainingKey}
-            onGenerate={handleGenerateNotes}
-            onSeekVideo={handleSeekVideo}
-            onExplainConcept={handleExplainConcept}
-          />
-        )}
-
-        {activeTab === 'flashcards' && (
-          <FlashcardsTab
-            flashcards={session?.flashcards}
-            masteredCardIds={session?.masteredCardIds ?? []}
-            hasContent={Boolean(session)}
-            isLoading={loadingTask === 'flashcards'}
-            policy={policy}
-            onGenerate={handleGenerateFlashcards}
-            onToggleMastered={handleToggleMastered}
-            onResetMastered={handleResetMastered}
-            onSeekVideo={handleSeekVideo}
-          />
-        )}
-
-        {activeTab === 'quiz' && (
-          <QuizTab
-            quiz={session?.quiz}
-            answers={session?.quizAnswers ?? {}}
-            hasContent={Boolean(session)}
-            isLoading={loadingTask === 'quiz'}
-            policy={policy}
-            explanations={session?.explanations}
-            explainingKey={explainingKey}
-            onGenerate={handleGenerateQuiz}
-            onSelectAnswer={handleSelectQuizAnswer}
-            onResetQuiz={handleResetQuiz}
-            onSeekVideo={handleSeekVideo}
-            onExplainConcept={handleExplainConcept}
-          />
+              </>
+            );
+          })()
+        ) : (
+          <OnboardingEmptyState onOpenHelp={() => setHelpOpen(true)} />
         )}
       </main>
 
-      {/* Bottom Export Action Bar */}
-      <footer className="sticky bottom-0 z-10 border-t border-slate-200 bg-white/95 px-3.5 py-2.5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/95">
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={!canExportMarkdown}
-            onClick={handleCopyMarkdown}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            {copiedFeedback ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-emerald-500" />
-                <span>Copied!</span>
-              </>
-            ) : (
-              <>
-                <ClipboardCopy className="h-3.5 w-3.5" />
-                <span>Copy Markdown</span>
-              </>
-            )}
-          </button>
+      <ExportBar
+        canExport={canExportMarkdown}
+        copiedFeedback={copiedFeedback}
+        onCopyMarkdown={() => void handleCopyMarkdown()}
+        onDownloadMarkdown={handleDownloadMarkdown}
+      />
 
-          <button
-            type="button"
-            disabled={!canExportCsv}
-            onClick={handleExportAnkiCsv}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>Export Anki CSV</span>
-          </button>
-        </div>
-      </footer>
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

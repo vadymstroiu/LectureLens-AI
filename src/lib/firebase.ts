@@ -1,5 +1,6 @@
 import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
+  CustomProvider,
   initializeAppCheck,
   ReCaptchaV3Provider,
   type AppCheck,
@@ -72,7 +73,14 @@ function configureAppCheckDebugToken(debugTokenValue: string): void {
 
   const normalized: boolean | string =
     debugTokenValue.toLowerCase() === 'true' ? true : debugTokenValue;
-  (self as unknown as Window).FIREBASE_APPCHECK_DEBUG_TOKEN = normalized;
+  (globalThis as unknown as Window).FIREBASE_APPCHECK_DEBUG_TOKEN = normalized;
+}
+
+function isChromeExtensionContext(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.location?.protocol === 'chrome-extension:'
+  );
 }
 
 export function getFirebaseApp(): FirebaseApp {
@@ -111,13 +119,21 @@ export function ensureFirebaseAppCheck(app: FirebaseApp): AppCheck | null {
 
   const cfg = readEnvConfig();
   if (cfg.appCheckDebugToken) {
+    // In debug mode, @firebase/app-check exchanges the debug token directly.
+    // Using CustomProvider avoids instantiating ReCaptchaV3Provider, which would
+    // inject https://www.google.com/recaptcha/api.js and violate MV3 script-src 'self'.
     configureAppCheckDebugToken(cfg.appCheckDebugToken);
-  }
-
-  if (cfg.recaptchaSiteKey || cfg.appCheckDebugToken) {
-    const providerKey = cfg.recaptchaSiteKey || 'debug-appcheck-site-key';
     cachedAppCheck = initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider(providerKey),
+      provider: new CustomProvider({
+        getToken: async () => {
+          throw new Error('App Check debug token mode is active.');
+        },
+      }),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } else if (cfg.recaptchaSiteKey && !isChromeExtensionContext()) {
+    cachedAppCheck = initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(cfg.recaptchaSiteKey),
       isTokenAutoRefreshEnabled: true,
     });
   }
@@ -134,4 +150,13 @@ export function getFirebaseAI(): AI {
   ensureFirebaseAppCheck(app);
   cachedAi = getAI(app, { backend: new GoogleAIBackend() });
   return cachedAi;
+}
+
+/**
+ * Clears cached Firebase instances for isolated unit tests.
+ */
+export function resetFirebaseCacheForTesting(): void {
+  cachedApp = null;
+  cachedAppCheck = null;
+  cachedAi = null;
 }

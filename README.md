@@ -1,25 +1,43 @@
 # LectureLens AI
 
-**LectureLens AI** is a Manifest V3 Chrome Extension that transforms YouTube lectures and web articles into **timestamped study notes**, **active-recall flashcards**, and **full-lecture practice quizzes** using **Firebase AI Logic Hybrid Inference** (`firebase` v12.5.0+).
+**LectureLens AI** is a Manifest V3 Chrome Side Panel Extension built for **#BuildHybridAI 2026** that turns long YouTube lectures and web articles into **timestamped study notes**, **active-recall flashcards**, **personal notes**, and **full-lecture practice quizzes** using **Firebase AI Logic Hybrid Inference** (`firebase` v12.5.0+).
 
-It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, private chapter extraction (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE`) and seamlessly delegates or falls back to **Cloud Gemini 3.8 Flash** (`inCloudParams` / `ONLY_IN_CLOUD`) for full-lecture reasoning.
+It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, private, zero-rate-limit study generation (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE`) and seamlessly routes or falls back to **Cloud Gemini 3.8 Flash** (`ONLY_IN_CLOUD` / `inCloudParams`) for full-lecture reasoning when needed.
+
+---
+
+## Problem Statement & Impact
+
+Students, engineers, and lifelong learners regularly watch 30–90+ minute YouTube lectures and read dense technical documentation, yet:
+- Scrubbing back through long videos to review definitions or key points wastes time.
+- Cloud-only AI tools add network latency, hit free-tier rate limits, and send private study notes to external servers.
+
+**LectureLens AI** solves this right inside Chrome's Side Panel: one click captures the transcript and automatically builds a complete, chapter-filterable study kit—stored **100% locally per Chrome user profile** and ready to review offline.
+
+---
+
+## Firebase AI Logic Hybrid Inference Matrix
+
+| Capability | Policy / Mode | Execution Strategy | Model(s) |
+| :--- | :--- | :--- | :--- |
+| **Full-Lecture Study Notes & Definitions** | `PREFER_ON_DEVICE` (Hybrid) or `ONLY_ON_DEVICE` (Local-Only) | On-device chapter map-reduce across up to 12 chapters when Gemini Nano is ready; single-call full-lecture Cloud synthesis when Nano is unavailable in Hybrid mode | Gemini Nano ↔ `gemini-3.8-flash` |
+| **Active-Recall Flashcards** | `PREFER_ON_DEVICE` (Hybrid) or `ONLY_ON_DEVICE` (Local-Only) | Scaled yield (6–24+ cards based on lecture length) via schema-constrained Nano map-reduce or single-call Cloud fallback | Gemini Nano ↔ `gemini-3.8-flash` |
+| **Explain Simply (Peer Tutor)** | `PREFER_ON_DEVICE` / `ONLY_ON_DEVICE` | Instant 2-sentence everyday analogy + key idea on any definition or missed quiz question | Gemini Nano ↔ `gemini-3.8-flash` |
+| **Full-Lecture Practice Quiz** | `ONLY_IN_CLOUD` | Evenly samples up to 60,000 chars across start, middle, and end for 5–12 cross-chapter MCQs (skipped automatically in Local-Only or offline mode) | `gemini-3.8-flash` |
+| **Backend Abuse Protection** | `firebase/app-check` | MV3-safe debug token attestation via `CustomProvider` (no external reCAPTCHA script blocked by `script-src 'self'`) or `ReCaptchaV3Provider` on HTTPS web origins | Firebase App Check |
 
 ---
 
 ## Key Features
 
-- **Explicit Hybrid Routing (`src/lib/hybridAi.ts`)**:
-  - **On-Device First (`InferenceMode.PREFER_ON_DEVICE`)**: Study Notes, Key Definitions, and Active-Recall Flashcards on segments up to `6,000` characters, with explicit `inCloudParams: { model: "gemini-3.8-flash" }` fallback.
-  - **Strict Local-Only Privacy Toggle**: Switches notes & flashcards to `InferenceMode.ONLY_ON_DEVICE` with zero cloud egress and clear Chrome flag recovery guidance if Gemini Nano is not yet downloaded.
-  - **Cloud Synthesis (`InferenceMode.ONLY_IN_CLOUD`)**: Generates a 5-question multiple-choice practice quiz across full-length transcripts (`gemini-3.8-flash`).
-- **Guaranteed Structured JSON (`Schema`)**: Every `generateContent` call enforces `responseMimeType: "application/json"` and `responseSchema` (plus `onDeviceParams.promptOptions.responseConstraint` for Gemini Nano).
-- **Live Telemetry & Hybrid Comparison**: Inspects `result.response.inferenceSource` and `performance.now()` latency on every call, displaying a live header badge (`⚡ On-Device (Gemini Nano) • 380ms` or `☁️ Cloud (Gemini) • 1.6s`), offline indicator, and a summary comparing local vs. cloud call counts, average latencies, and `% On-Device` ratio.
-- **Cloud → On-Device Tutor Loop ("Explain Simply")**: Click **Explain Simply (Nano)** on any Key Definition or missed Cloud Practice Quiz question to generate an instant, private 2-sentence analogy + key idea on-device.
-- **First-Click Background Nano Pre-Warming**: Automatically starts downloading Gemini Nano on the user's first interaction inside the Side Panel (complying with Chrome's user-activation requirement) with live `%` progress while **Hybrid** mode remains immediately usable.
-- **One-Click YouTube Transcript Capture & Video Seeking**: Captures timestamped captions directly from `youtube.com` and lets you click any `[mm:ss]` chip in Notes, Flashcards, or Quiz explanations to jump straight to that moment in the video.
-- **Article / Text Capture & Smart Chapter Windowing**: Grab highlighted text from any page or paste notes; transcripts over `6,000` chars automatically split into time-labeled Nano chapters while keeping full-lecture coverage (`60,000`-char evenly sampled spans) ready for the Cloud Quiz.
-- **Active-Recall Flashcards**: Auto-advances on **Mark Mastered**, hides mastered cards by default (with a **Show mastered** toggle), and supports keyboard shortcuts (`Space` flip, `←`/`→` navigate, `M` mark mastered).
-- **Offline Study Library & Export**: Auto-saves multiple lecture sessions in `chrome.storage.local` with a collapsible **Library** switcher, copies formatted Markdown, and exports RFC-4180 Anki `.csv` decks (`front,back`).
+- **One-Click Capture-to-Study-Kit Pipeline**: Clicking **Capture YouTube Transcript** automatically generates **Notes → Flashcards → Quiz** (skipping Cloud Quiz in `Local-Only` or offline mode), with an **Auto-generate study kit** toggle and mid-run **Cancel** support.
+- **Scaled Full-Lecture Yields & Non-Destructive Chapter Filtering**: Automatically scales output from short clips up to 39m+ lectures (~16–22 takeaways, ~10–15 definitions, ~18–24 flashcards, 12 quiz questions). The **Chapter Filter** dropdown defaults to **All Chapters** and filters Notes, Flashcards, and Quiz items cleanly—plus a **Deep-Dive Chapter (+More)** action to merge extra notes or flashcards from any specific chapter.
+- **Timestamped Personal Notes**: Add, edit, and delete your own study notes inside the **Notes** tab, with a one-click **Use Video Time** button (`GET_VIDEO_TIME`) that stamps the active YouTube player's exact timestamp.
+- **Smart Cross-Tab YouTube Timestamp Deep-Linking**: Clicking any `[mm:ss]` chip seeks the active YouTube tab in-place, focuses & seeks another open tab playing that video, or opens `https://www.youtube.com/watch?v={id}&t={seconds}s` in a new tab when reviewing past sessions from any other webpage.
+- **Searchable Local Study History (`chrome.storage.local`)**: Every parsed lecture is saved **100% locally in the user's Chrome profile** (private & offline-capable) with title/URL search, clickable source links, capture date/time, completion badges, and profile storage usage stats.
+- **Complete Markdown Export (`Copy Markdown` & `Download .md`)**: Exports everything—source metadata, Hybrid AI telemetry summary, overview, takeaways, definitions + Nano analogies, personal notes, flashcards with mastery flags, and the full practice quiz with answer key & clickable YouTube timestamp links.
+- **Live Telemetry & First-Click Nano Pre-Warming**: Tracks `result.response.inferenceSource` and `performance.now()` latency per call, supports one-click Chrome flag/component troubleshooting, and pre-warms Gemini Nano download on first panel interaction.
+- **Unified Brand Design & WCAG 2.1 AA Accessibility**: Unified vector brand logo & extension icons (`16/32/48/128px`), responsive Side Panel layout (`max-w-2xl`), finger-pointer cursors, skip-to-content link, WAI-ARIA `tablist`/`tab`/`tabpanel` with arrow-key navigation, modal focus trapping, non-color-only quiz feedback, and `prefers-reduced-motion` support.
 
 ---
 
@@ -27,20 +45,21 @@ It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, pr
 
 ```mermaid
 flowchart TB
-    subgraph TAB["Active Browser Tab (YouTube / Web Article)"]
-        CS["src/content/youtube.ts<br/>Transcript Capture & SEEK_VIDEO"]
-        SEL["chrome.scripting<br/>Highlighted Selection Capture"]
+    subgraph TAB["Browser Tabs (YouTube / Web Articles)"]
+        YT["src/content/youtube.ts<br/>CAPTURE_TRANSCRIPT | SEEK_VIDEO | GET_VIDEO_TIME"]
+        NEW["Cross-Tab Deep Link<br/>youtube.com/watch?v=ID&t=Xs"]
     end
 
     subgraph BG["Background Service Worker (MV3)"]
-        SW["src/background/serviceWorker.ts<br/>openPanelOnActionClick ONLY<br/>(Zero Firebase / AI imports)"]
+        SW["src/background/serviceWorker.ts<br/>openPanelOnActionClick ONLY"]
     end
 
-    subgraph SP["Chrome Side Panel (Window/Document Context)"]
-        UI["React + Tailwind Side Panel<br/>Notes | Flashcards | Quiz | Exporters"]
-        STORE["chrome.storage.local<br/>Offline Session Persistence"]
-        FB["src/lib/firebase.ts<br/>initializeApp + AppCheck Debug Token + getAI"]
-        AI["src/lib/hybridAi.ts<br/>Schema + Latency & inferenceSource"]
+    subgraph SP["Chrome Side Panel (src/sidepanel/)"]
+        BRIDGE["youtubeBridge.ts<br/>Capture, Selection, Cross-Tab Seek"]
+        UI["Modular React + Tailwind UI<br/>Notes (+ Personal Notes) | Flashcards | Quiz | History | Export"]
+        STORE["storage.ts (chrome.storage.local)<br/>Private Per-Profile History & Preferences"]
+        FB["src/lib/firebase.ts<br/>initializeApp + AppCheck + getAI"]
+        AI["src/lib/hybridAi.ts<br/>Scaled Map-Reduce, Cloud Fallback, Telemetry"]
     end
 
     subgraph ENGINES["Firebase AI Logic Hybrid Inference"]
@@ -48,14 +67,16 @@ flowchart TB
         CLOUD["Cloud: Gemini 3.8 Flash<br/>(GoogleAIBackend)"]
     end
 
-    TAB <-->|"CAPTURE_TRANSCRIPT / SEEK_VIDEO"| SP
-    SW -->|"Opens Side Panel"| SP
+    TAB <--> BRIDGE
+    BRIDGE --> NEW
+    SW -->|"Opens Side Panel"| UI
+    BRIDGE <--> UI
     UI <--> STORE
     UI --> AI
     AI --> FB
-    AI -->|"Notes & Flashcards (<= 6,000 chars)<br/>PREFER_ON_DEVICE or ONLY_ON_DEVICE"| NANO
-    NANO -.->|"Automatic fallback in Hybrid mode"| CLOUD
-    AI -->|"Full-Lecture 5-Q Quiz<br/>ONLY_IN_CLOUD"| CLOUD
+    AI -->|"Notes, Flashcards, Explain Simply<br/>PREFER_ON_DEVICE / ONLY_ON_DEVICE"| NANO
+    NANO -.->|"Single-call Cloud fallback in Hybrid mode"| CLOUD
+    AI -->|"Scaled Full-Lecture Quiz (5–12 Qs)<br/>ONLY_IN_CLOUD"| CLOUD
 ```
 
 > **Why Side Panel execution?** Chrome's Built-in Prompt API (`LanguageModel` / Gemini Nano) requires a window/document context and is unavailable in MV3 service workers. All `firebase/ai` and `firebase/app-check` calls execute inside `src/sidepanel/`.
@@ -66,12 +87,12 @@ flowchart TB
 
 ### 1. Enable Gemini Nano in Chrome (On-Device AI)
 
-Use **Chrome 138+** (Stable, Beta, Dev, or Canary) on desktop with at least 22 GB free disk space and >4 GB VRAM (or 16 GB RAM + 4+ CPU cores):
+Use **Chrome 138+** on desktop with at least 22 GB free disk space and >4 GB VRAM (or 16 GB RAM + 4+ CPU cores):
 
 1. Open `chrome://flags/#optimization-guide-on-device-model` and set it to **Enabled BypassPerfRequirement**.
 2. Open `chrome://flags/#prompt-api-for-gemini-nano` and set it to **Enabled**.
 3. Relaunch Chrome.
-4. Open `chrome://on-device-internals` → **Model Status** to confirm Gemini Nano is downloaded/ready (or trigger download via DevTools console: `await LanguageModel.create()`).
+4. Open `chrome://on-device-internals` → **Model Status** (or `chrome://components`) to confirm Gemini Nano is downloaded/ready.
 
 ### 2. Configure Firebase AI Logic & App Check
 
@@ -98,7 +119,7 @@ npm install
 # 2. Run strict TypeScript typechecking
 npm run typecheck
 
-# 3. Run Vitest unit tests (hybrid routing, telemetry, exporters, YouTube parsers)
+# 3. Run Vitest unit tests (hybrid routing, scaling, exporters, storage, YouTube bridge & parsers)
 npm test
 
 # 4. Build production Manifest V3 extension into dist/
@@ -119,13 +140,11 @@ npm run build
 
 ## Usage Guide
 
-1. **Capture Content**: Navigate to any `youtube.com/watch?v=...` lecture and click **Capture YouTube Transcript** (or expand **Paste / Selected Text** to grab highlighted text or click **Sample** for a built-in demo lecture).
-2. **Generate Notes & Flashcards (On-Device First)**:
-   - On the **Notes** tab, click **Extract Key Notes & Terms** (`PREFER_ON_DEVICE`). Click any `[mm:ss]` timestamp chip to seek the YouTube player directly.
-   - On the **Flashcards** tab, click **Create Active-Recall Cards**, flip cards to test recall, and mark cards as **Mastered**.
-3. **Test Strict Local-Only Mode**: Toggle **Local-Only** in the header to enforce `InferenceMode.ONLY_ON_DEVICE` and verify offline privacy (with zero cloud calls).
-4. **Generate Full-Lecture Quiz (Cloud)**: Switch to the **Quiz** tab and click **Generate Full-Lecture Quiz (Cloud)** (`ONLY_IN_CLOUD` using `gemini-3.8-flash`) for 5 cross-chapter MCQs with instant explanations and timestamp jumps.
-5. **Export & Offline Restore**: Use **Copy Markdown** or **Export Anki CSV** in the bottom bar. Closing and reopening the Side Panel automatically restores your latest session from `chrome.storage.local`.
+1. **Capture Content**: Navigate to any `youtube.com/watch?v=...` lecture and click **Capture YouTube Transcript** (or expand **Paste / Selected Text** to grab highlighted text from any webpage).
+2. **Automatic Study Kit & Chapter Filtering**: LectureLens AI automatically extracts **Notes**, **Flashcards**, and (in Hybrid mode) a **Practice Quiz** across the full video. Use **Chapter Filter** to focus on a specific section or click **Deep-Dive Chapter (+More)** for extra coverage.
+3. **Add Personal Notes & Jump to Video Moments**: Add your own notes (with one-click **Use Video Time**) in **Notes**. Click any `[mm:ss]` timestamp chip—even from a saved session in **History** while browsing another site—to jump straight to that second in YouTube.
+4. **Practice & Tutor Loop**: Drill **Flashcards** (`Space` flip, `←`/`→` navigate, `M` mark mastered) and take the **Quiz** (`Explain Simply (Nano)` gives instant plain-English analogies on-device).
+5. **Export Complete Study Guide**: Click **Copy Markdown** or **Download `.md`** in the bottom bar to save all notes, personal notes, flashcards, quiz questions, and clickable YouTube links.
 
 ---
 

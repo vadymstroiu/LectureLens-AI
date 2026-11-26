@@ -91,6 +91,85 @@ export function extractVideoId(url: string): string | null {
   return null;
 }
 
+/**
+ * Builds a shareable YouTube watch URL anchored at `startSeconds` (`&t=Xs`),
+ * or returns `null` if `rawUrl` is not a valid YouTube URL.
+ */
+export function buildYouTubeTimestampUrl(
+  rawUrl: string,
+  startSeconds: number,
+): string | null {
+  const videoId = extractVideoId(rawUrl);
+  if (!videoId) return null;
+
+  const safeSeconds = Number.isFinite(startSeconds)
+    ? Math.max(0, Math.floor(startSeconds))
+    : 0;
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${safeSeconds}s`;
+}
+
+/**
+ * Validates and normalizes an optional `mm:ss` or `h:mm:ss` timestamp string,
+ * returning `null` if empty or invalid.
+ */
+export function normalizeOptionalTimestamp(
+  input: string,
+): { timestamp: string; startSeconds: number } | null {
+  const cleaned = input.replace(/^\[|\]$/g, '').trim();
+  if (!cleaned || !/^\d{1,2}:\d{2}(?::\d{2})?$/.test(cleaned)) {
+    return null;
+  }
+
+  const parts = cleaned.split(':').map((part) => Number(part));
+  if (parts.some((n) => !Number.isInteger(n) || n < 0)) {
+    return null;
+  }
+
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    if (seconds >= 60) return null;
+    const startSeconds = minutes * 60 + seconds;
+    return { timestamp: formatTimestamp(startSeconds), startSeconds };
+  }
+
+  if (parts.length === 3) {
+    const [hours, minutes, seconds] = parts;
+    if (minutes >= 60 || seconds >= 60) return null;
+    const startSeconds = hours * 3600 + minutes * 60 + seconds;
+    return { timestamp: formatTimestamp(startSeconds), startSeconds };
+  }
+
+  return null;
+}
+
+/**
+ * Strips brackets from model-returned timestamps, derives canonical
+ * `startSeconds` (preferring valid timestamp strings over miscalculated model
+ * numbers), and formats clean `mm:ss` / `h:mm:ss` strings.
+ */
+export function normalizeTimestampFields<
+  T extends { timestamp?: string; startSeconds?: number },
+>(item: T): T & { timestamp: string; startSeconds: number } {
+  const parsedFromString = normalizeOptionalTimestamp(item.timestamp ?? '');
+  const hasNumeric =
+    typeof item.startSeconds === 'number' &&
+    Number.isFinite(item.startSeconds) &&
+    item.startSeconds >= 0;
+
+  const startSeconds =
+    parsedFromString && (parsedFromString.startSeconds > 0 || !hasNumeric)
+      ? parsedFromString.startSeconds
+      : hasNumeric
+        ? Math.floor(item.startSeconds!)
+        : 0;
+
+  return {
+    ...item,
+    timestamp: formatTimestamp(startSeconds),
+    startSeconds,
+  };
+}
+
 function normalizeCaptionText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }

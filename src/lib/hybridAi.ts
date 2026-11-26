@@ -8,10 +8,7 @@ import {
   type GenerativeModel,
   type HybridParams,
 } from 'firebase/ai';
-import {
-  formatTimestamp,
-  parseTimestampToSeconds,
-} from '../content/youtubeTranscriptParser';
+import { normalizeTimestampFields } from '../content/youtubeTranscriptParser';
 import type {
   Flashcard,
   FlashcardsData,
@@ -31,6 +28,8 @@ import { getFirebaseAI, isFirebaseConfigured } from './firebase';
 
 export const ON_DEVICE_CHAR_LIMIT = 6000;
 export const FULL_LECTURE_CHAR_LIMIT = 60000;
+export const ALL_CHAPTERS_ID = 'all';
+export const MAX_ON_DEVICE_CHAPTERS = 12;
 export const CLOUD_MODEL_NAME =
   (import.meta.env.VITE_FIREBASE_CLOUD_MODEL ?? '').trim() ||
   'gemini-3.8-flash';
@@ -41,6 +40,7 @@ export type HybridAiErrorCode =
   | 'RATE_LIMITED'
   | 'EMPTY_CONTENT'
   | 'INVALID_RESPONSE'
+  | 'ABORTED'
   | 'INFERENCE_FAILED';
 
 export class HybridAiError extends Error {
@@ -71,110 +71,193 @@ export interface HybridCallResult<T> {
   telemetry: InferenceTelemetry;
 }
 
+export interface StudyTargetCounts {
+  takeawaysMin: number;
+  takeawaysMax: number;
+  definitionsMin: number;
+  definitionsMax: number;
+  flashcardsMin: number;
+  flashcardsMax: number;
+  quizCount: number;
+}
+
 export interface HybridInferenceDeps {
   ai?: AI;
   modelFactory?: (ai: AI, params: HybridParams) => Pick<GenerativeModel, 'generateContent'>;
   now?: () => number;
   onDownloadProgress?: (percent: number) => void;
+  onChapterProgress?: (current: number, total: number, label: string) => void;
+  checkAvailability?: () => Promise<OnDeviceAvailability>;
+  signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
+  targetTakeaways?: [number, number];
+  targetDefinitions?: [number, number];
+  targetFlashcards?: [number, number];
+  questionCount?: number;
+  idPrefix?: string;
 }
+
+interface OnDeviceLanguageSpec {
+  type: 'text';
+  languages: string[];
+}
+
+interface OnDeviceLanguageOptions {
+  expectedInputs?: OnDeviceLanguageSpec[];
+  expectedOutputs?: OnDeviceLanguageSpec[];
+}
+
+const DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS: OnDeviceLanguageOptions = {
+  expectedInputs: [{ type: 'text', languages: ['en'] }],
+  expectedOutputs: [{ type: 'text', languages: ['en'] }],
+};
 
 interface ChromeLanguageModelGlobal {
   LanguageModel?: {
-    availability?: () => Promise<string>;
-    create?: (options?: {
-      monitor?: (m: {
-        addEventListener: (
-          eventType: 'downloadprogress',
-          listener: (e: { loaded: number }) => void,
-        ) => void;
-      }) => void;
-    }) => Promise<{ destroy?: () => void }>;
+    availability?: (options?: OnDeviceLanguageOptions) => Promise<string>;
+    create?: (
+      options?: OnDeviceLanguageOptions & {
+        monitor?: (m: {
+          addEventListener: (
+            eventType: 'downloadprogress',
+            listener: (e: { loaded: number }) => void,
+          ) => void;
+        }) => void;
+      },
+    ) => Promise<{ destroy?: () => void }>;
   };
 }
 
 // --- Structured Output Schemas (firebase/ai Schema) ---
 
-export const studyNotesSchema = Schema.object({
-  properties: {
-    overview: Schema.string({
-      description: 'Two-sentence synthesis of the lecture section.',
-    }),
-    takeaways: Schema.array({
-      description: '4 to 6 key takeaways anchored to transcript timestamps.',
-      items: Schema.object({
-        properties: {
-          point: Schema.string(),
-          timestamp: Schema.string({
-            description: 'mm:ss timestamp from the transcript, e.g. 01:35',
-          }),
-          startSeconds: Schema.integer(),
-        },
-      }),
-    }),
-    definitions: Schema.array({
-      description: '3 to 6 core terms and concise definitions.',
-      items: Schema.object({
-        properties: {
-          term: Schema.string(),
-          definition: Schema.string(),
-          timestamp: Schema.string({
-            description: 'mm:ss timestamp where the term is introduced',
-          }),
-          startSeconds: Schema.integer(),
-        },
-      }),
-    }),
-  },
-});
+function clampMinForLength(requestedMin: number, charLength: number): number {
+  if (charLength >= 1800) return requestedMin;
+  if (charLength >= 600) return Math.min(requestedMin, 2);
+  return 1;
+}
 
-export const flashcardsSchema = Schema.object({
-  properties: {
-    cards: Schema.array({
-      description: '5 to 8 active-recall study flashcards.',
-      items: Schema.object({
-        properties: {
-          id: Schema.string(),
-          front: Schema.string({
-            description: 'Concise active-recall question or concept prompt.',
-          }),
-          back: Schema.string({
-            description: 'Clear, accurate answer in 1-3 sentences.',
-          }),
-          timestamp: Schema.string({
-            description: 'mm:ss source timestamp in the lecture',
-          }),
-          startSeconds: Schema.integer(),
-        },
+export function buildStudyNotesSchema(
+  takeawaysBounds?: [number, number],
+  definitionsBounds?: [number, number],
+) {
+  return Schema.object({
+    properties: {
+      overview: Schema.string({
+        description: 'Concise synthesis of the lecture or section.',
       }),
-    }),
-  },
-});
+      takeaways: Schema.array({
+        description: 'Key takeaways anchored to transcript timestamps.',
+        ...(takeawaysBounds
+          ? {
+              minItems: takeawaysBounds[0],
+              maxItems: takeawaysBounds[1],
+            }
+          : {}),
+        items: Schema.object({
+          properties: {
+            point: Schema.string(),
+            timestamp: Schema.string({
+              description: 'mm:ss timestamp from the transcript, e.g. 01:35',
+            }),
+            startSeconds: Schema.integer(),
+          },
+        }),
+      }),
+      definitions: Schema.array({
+        description: 'Core technical terms and concise definitions.',
+        ...(definitionsBounds
+          ? {
+              minItems: definitionsBounds[0],
+              maxItems: definitionsBounds[1],
+            }
+          : {}),
+        items: Schema.object({
+          properties: {
+            term: Schema.string(),
+            definition: Schema.string(),
+            timestamp: Schema.string({
+              description: 'mm:ss timestamp where the term is introduced',
+            }),
+            startSeconds: Schema.integer(),
+          },
+        }),
+      }),
+    },
+  });
+}
 
-export const quizSchema = Schema.object({
-  properties: {
-    questions: Schema.array({
-      description: 'Exactly 5 multiple-choice practice questions.',
-      items: Schema.object({
-        properties: {
-          id: Schema.string(),
-          question: Schema.string(),
-          options: Schema.array({
-            items: Schema.string(),
-          }),
-          correctIndex: Schema.integer({
-            description: '0-based index (0..3) of the correct option.',
-          }),
-          explanation: Schema.string(),
-          timestamp: Schema.string({
-            description: 'mm:ss timestamp where this concept is explained',
-          }),
-          startSeconds: Schema.integer(),
-        },
+export const studyNotesSchema = buildStudyNotesSchema();
+
+export function buildFlashcardsSchema(cardBounds?: [number, number]) {
+  return Schema.object({
+    properties: {
+      cards: Schema.array({
+        description: 'Active-recall study flashcards.',
+        ...(cardBounds
+          ? {
+              minItems: cardBounds[0],
+              maxItems: cardBounds[1],
+            }
+          : {}),
+        items: Schema.object({
+          properties: {
+            id: Schema.string(),
+            front: Schema.string({
+              description: 'Concise active-recall question or concept prompt.',
+            }),
+            back: Schema.string({
+              description: 'Clear, accurate answer in 1-3 sentences.',
+            }),
+            timestamp: Schema.string({
+              description: 'mm:ss source timestamp in the lecture',
+            }),
+            startSeconds: Schema.integer(),
+          },
+        }),
       }),
-    }),
-  },
-});
+    },
+  });
+}
+
+export const flashcardsSchema = buildFlashcardsSchema();
+
+export function buildQuizSchema(questionCount?: number) {
+  return Schema.object({
+    properties: {
+      questions: Schema.array({
+        description:
+          'Multiple-choice practice questions spanning the full lecture.',
+        ...(questionCount !== undefined
+          ? {
+              minItems: questionCount,
+              maxItems: questionCount,
+            }
+          : {}),
+        items: Schema.object({
+          properties: {
+            id: Schema.string(),
+            question: Schema.string(),
+            options: Schema.array({
+              minItems: 4,
+              maxItems: 4,
+              items: Schema.string(),
+            }),
+            correctIndex: Schema.integer({
+              description: '0-based index (0..3) of the correct option.',
+            }),
+            explanation: Schema.string(),
+            timestamp: Schema.string({
+              description: 'mm:ss timestamp where this concept is explained',
+            }),
+            startSeconds: Schema.integer(),
+          },
+        }),
+      }),
+    },
+  });
+}
+
+export const quizSchema = buildQuizSchema();
 
 export const simpleExplanationSchema = Schema.object({
   properties: {
@@ -188,59 +271,84 @@ export const simpleExplanationSchema = Schema.object({
 });
 
 // Plain JSON Schema constraints for Chrome's on-device Prompt API
-const STUDY_NOTES_JSON_CONSTRAINT = {
-  type: 'object',
-  properties: {
-    overview: { type: 'string' },
-    takeaways: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          point: { type: 'string' },
-          timestamp: { type: 'string' },
-          startSeconds: { type: 'integer' },
+function buildStudyNotesJsonConstraint(
+  takeawaysBounds?: [number, number],
+  definitionsBounds?: [number, number],
+) {
+  return {
+    type: 'object',
+    properties: {
+      overview: { type: 'string' },
+      takeaways: {
+        type: 'array',
+        ...(takeawaysBounds
+          ? {
+              minItems: takeawaysBounds[0],
+              maxItems: takeawaysBounds[1],
+            }
+          : {}),
+        items: {
+          type: 'object',
+          properties: {
+            point: { type: 'string' },
+            timestamp: { type: 'string' },
+            startSeconds: { type: 'integer' },
+          },
+          required: ['point', 'timestamp', 'startSeconds'],
         },
-        required: ['point', 'timestamp', 'startSeconds'],
+      },
+      definitions: {
+        type: 'array',
+        ...(definitionsBounds
+          ? {
+              minItems: definitionsBounds[0],
+              maxItems: definitionsBounds[1],
+            }
+          : {}),
+        items: {
+          type: 'object',
+          properties: {
+            term: { type: 'string' },
+            definition: { type: 'string' },
+            timestamp: { type: 'string' },
+            startSeconds: { type: 'integer' },
+          },
+          required: ['term', 'definition', 'timestamp', 'startSeconds'],
+        },
       },
     },
-    definitions: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          term: { type: 'string' },
-          definition: { type: 'string' },
-          timestamp: { type: 'string' },
-          startSeconds: { type: 'integer' },
-        },
-        required: ['term', 'definition', 'timestamp', 'startSeconds'],
-      },
-    },
-  },
-  required: ['overview', 'takeaways', 'definitions'],
-};
+    required: ['overview', 'takeaways', 'definitions'],
+  };
+}
 
-const FLASHCARDS_JSON_CONSTRAINT = {
-  type: 'object',
-  properties: {
-    cards: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          front: { type: 'string' },
-          back: { type: 'string' },
-          timestamp: { type: 'string' },
-          startSeconds: { type: 'integer' },
+function buildFlashcardsJsonConstraint(cardBounds?: [number, number]) {
+  return {
+    type: 'object',
+    properties: {
+      cards: {
+        type: 'array',
+        ...(cardBounds
+          ? {
+              minItems: cardBounds[0],
+              maxItems: cardBounds[1],
+            }
+          : {}),
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            front: { type: 'string' },
+            back: { type: 'string' },
+            timestamp: { type: 'string' },
+            startSeconds: { type: 'integer' },
+          },
+          required: ['id', 'front', 'back', 'timestamp', 'startSeconds'],
         },
-        required: ['id', 'front', 'back', 'timestamp', 'startSeconds'],
       },
     },
-  },
-  required: ['cards'],
-};
+    required: ['cards'],
+  };
+}
 
 const SIMPLE_EXPLANATION_JSON_CONSTRAINT = {
   type: 'object',
@@ -292,6 +400,8 @@ export function chunkTranscriptSegments(
       label: `Part ${idx} (${first.timestamp}–${last.timestamp})`,
       startTimestamp: first.timestamp,
       endTimestamp: last.timestamp,
+      startSeconds: first.startSeconds,
+      endSeconds: last.startSeconds,
       charCount: text.length,
       text,
       segments: currentSegments,
@@ -316,6 +426,166 @@ export function chunkTranscriptSegments(
   return chunks;
 }
 
+/**
+ * Computes scaled study item target counts proportional to content length.
+ */
+export function computeTargetCounts(charCount: number): StudyTargetCounts {
+  if (charCount <= ON_DEVICE_CHAR_LIMIT) {
+    return {
+      takeawaysMin: 5,
+      takeawaysMax: 7,
+      definitionsMin: 4,
+      definitionsMax: 6,
+      flashcardsMin: 6,
+      flashcardsMax: 8,
+      quizCount: 5,
+    };
+  }
+  if (charCount <= 18000) {
+    return {
+      takeawaysMin: 8,
+      takeawaysMax: 12,
+      definitionsMin: 6,
+      definitionsMax: 9,
+      flashcardsMin: 10,
+      flashcardsMax: 14,
+      quizCount: 8,
+    };
+  }
+  if (charCount <= 36000) {
+    return {
+      takeawaysMin: 12,
+      takeawaysMax: 16,
+      definitionsMin: 8,
+      definitionsMax: 12,
+      flashcardsMin: 15,
+      flashcardsMax: 20,
+      quizCount: 10,
+    };
+  }
+  return {
+    takeawaysMin: 16,
+    takeawaysMax: 22,
+    definitionsMin: 10,
+    definitionsMax: 15,
+    flashcardsMin: 18,
+    flashcardsMax: 24,
+    quizCount: 12,
+  };
+}
+
+/**
+ * Selects up to `maxCount` evenly distributed chunks spanning start to end.
+ */
+export function selectRepresentativeChunks(
+  chunks: TranscriptChunk[],
+  maxCount = MAX_ON_DEVICE_CHAPTERS,
+): TranscriptChunk[] {
+  if (chunks.length <= maxCount || maxCount <= 0) return chunks;
+  if (maxCount === 1) return [chunks[0]];
+
+  const pickedIndices = new Set<number>();
+  for (let i = 0; i < maxCount; i++) {
+    const idx = Math.round((i * (chunks.length - 1)) / (maxCount - 1));
+    pickedIndices.add(idx);
+  }
+  return Array.from(pickedIndices)
+    .sort((a, b) => a - b)
+    .map((idx) => chunks[idx]);
+}
+
+/**
+ * Filters timestamped study items to the selected chapter without dropping or
+ * duplicating items that land in gaps between adjacent chapter boundaries.
+ */
+export function filterItemsByChunk<T extends { startSeconds: number }>(
+  items: T[],
+  chunks: TranscriptChunk[],
+  selectedChunkId: string,
+): T[] {
+  if (selectedChunkId === ALL_CHAPTERS_ID || chunks.length <= 1) {
+    return items;
+  }
+  const idx = chunks.findIndex((c) => c.id === selectedChunkId);
+  if (idx === -1) return items;
+
+  const lowerBound = idx === 0 ? Number.NEGATIVE_INFINITY : chunks[idx].startSeconds;
+  const upperBound =
+    idx === chunks.length - 1
+      ? Number.POSITIVE_INFINITY
+      : chunks[idx + 1].startSeconds;
+
+  return items.filter(
+    (item) => item.startSeconds >= lowerBound && item.startSeconds < upperBound,
+  );
+}
+
+/**
+ * Merges incoming study notes with existing notes, deduplicating takeaways and
+ * definitions and preserving chronological timestamp order.
+ */
+export function mergeStudyNotes(
+  existing: StudyNotesData | undefined,
+  incoming: StudyNotesData,
+): StudyNotesData {
+  const overview = existing?.overview?.trim() || incoming.overview.trim();
+
+  const takeawayMap = new Map<string, StudyNotesData['takeaways'][number]>();
+  for (const item of [...(existing?.takeaways ?? []), ...incoming.takeaways]) {
+    const key = item.point.trim().toLowerCase();
+    if (key && !takeawayMap.has(key)) {
+      takeawayMap.set(key, item);
+    }
+  }
+
+  const defMap = new Map<string, StudyNotesData['definitions'][number]>();
+  for (const def of [...(existing?.definitions ?? []), ...incoming.definitions]) {
+    const key = def.term.trim().toLowerCase();
+    if (key && !defMap.has(key)) {
+      defMap.set(key, def);
+    }
+  }
+
+  return {
+    overview,
+    takeaways: Array.from(takeawayMap.values()).sort(
+      (a, b) => a.startSeconds - b.startSeconds,
+    ),
+    definitions: Array.from(defMap.values()).sort(
+      (a, b) => a.startSeconds - b.startSeconds,
+    ),
+  };
+}
+
+/**
+ * Merges incoming flashcards with an existing deck, deduplicating by front
+ * prompt, guaranteeing unique card IDs, and sorting chronologically.
+ */
+export function mergeFlashcards(
+  existing: FlashcardsData | undefined,
+  incoming: FlashcardsData,
+): FlashcardsData {
+  const seenFronts = new Set<string>();
+  const usedIds = new Set<string>();
+  const merged: Flashcard[] = [];
+
+  for (const card of [...(existing?.cards ?? []), ...incoming.cards]) {
+    const frontKey = card.front.trim().toLowerCase();
+    if (!frontKey || seenFronts.has(frontKey)) continue;
+    seenFronts.add(frontKey);
+
+    let cardId = card.id.trim() || `card-${merged.length + 1}`;
+    if (usedIds.has(cardId)) {
+      cardId = `${cardId}-${merged.length + 1}`;
+    }
+    usedIds.add(cardId);
+    merged.push({ ...card, id: cardId });
+  }
+
+  merged.sort((a, b) => a.startSeconds - b.startSeconds);
+  return { cards: merged };
+}
+
 export function resolveLocalFirstMode(
   policy: HybridRoutingPolicy,
 ): InferenceMode {
@@ -329,7 +599,7 @@ export async function checkOnDeviceAvailability(): Promise<OnDeviceAvailability>
   if (!api?.availability) return 'unavailable';
 
   try {
-    const status = await api.availability();
+    const status = await api.availability(DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS);
     if (status === 'available' || status === 'readily') return 'available';
     if (status === 'downloadable' || status === 'after-download') {
       return 'downloadable';
@@ -381,6 +651,7 @@ export async function triggerOnDeviceDownload(
   }
 
   const session = await api.create({
+    ...DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS,
     monitor: (m) => {
       m.addEventListener('downloadprogress', (e) => {
         const pct = Math.min(
@@ -465,8 +736,7 @@ function buildOnDeviceCreateOptions(
   onDownloadProgress?: (percent: number) => void,
 ) {
   return {
-    expectedInputs: [{ type: 'text' as const, languages: ['en'] }],
-    expectedOutputs: [{ type: 'text' as const, languages: ['en'] }],
+    ...DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS,
     ...(onDownloadProgress
       ? {
           monitor: (m: {
@@ -491,6 +761,8 @@ function buildOnDeviceCreateOptions(
 export function buildNotesModelParams(
   policy: HybridRoutingPolicy,
   onDownloadProgress?: (percent: number) => void,
+  takeawaysBounds?: [number, number],
+  definitionsBounds?: [number, number],
 ): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
@@ -498,14 +770,20 @@ export function buildNotesModelParams(
       model: CLOUD_MODEL_NAME,
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: studyNotesSchema,
+        responseSchema: buildStudyNotesSchema(
+          takeawaysBounds,
+          definitionsBounds,
+        ),
         temperature: 0.2,
       },
     },
     onDeviceParams: {
       createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
       promptOptions: {
-        responseConstraint: STUDY_NOTES_JSON_CONSTRAINT,
+        responseConstraint: buildStudyNotesJsonConstraint(
+          takeawaysBounds,
+          definitionsBounds,
+        ),
       },
     },
   };
@@ -514,6 +792,7 @@ export function buildNotesModelParams(
 export function buildFlashcardsModelParams(
   policy: HybridRoutingPolicy,
   onDownloadProgress?: (percent: number) => void,
+  cardBounds?: [number, number],
 ): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
@@ -521,27 +800,74 @@ export function buildFlashcardsModelParams(
       model: CLOUD_MODEL_NAME,
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: flashcardsSchema,
+        responseSchema: buildFlashcardsSchema(cardBounds),
         temperature: 0.3,
       },
     },
     onDeviceParams: {
       createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
       promptOptions: {
-        responseConstraint: FLASHCARDS_JSON_CONSTRAINT,
+        responseConstraint: buildFlashcardsJsonConstraint(cardBounds),
       },
     },
   };
 }
 
-export function buildQuizModelParams(): HybridParams {
+export function buildQuizModelParams(questionCount?: number): HybridParams {
   return {
     mode: InferenceMode.ONLY_IN_CLOUD,
     inCloudParams: {
       model: CLOUD_MODEL_NAME,
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: quizSchema,
+        responseSchema: buildQuizSchema(questionCount),
+        temperature: 0.3,
+      },
+    },
+  };
+}
+
+/**
+ * Cloud parameters for single-call full-lecture study notes synthesis when
+ * Gemini Nano is unavailable in Hybrid mode.
+ */
+export function buildFullLectureNotesCloudParams(
+  targets?: StudyTargetCounts,
+): HybridParams {
+  const schema = targets
+    ? buildStudyNotesSchema(
+        [targets.takeawaysMin, targets.takeawaysMax],
+        [targets.definitionsMin, targets.definitionsMax],
+      )
+    : studyNotesSchema;
+
+  return {
+    mode: InferenceMode.ONLY_IN_CLOUD,
+    inCloudParams: {
+      model: CLOUD_MODEL_NAME,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+        temperature: 0.2,
+      },
+    },
+  };
+}
+
+/**
+ * Cloud parameters for single-call full-lecture flashcard synthesis when
+ * Gemini Nano is unavailable in Hybrid mode.
+ */
+export function buildFullLectureFlashcardsCloudParams(
+  cardBounds?: [number, number],
+): HybridParams {
+  return {
+    mode: InferenceMode.ONLY_IN_CLOUD,
+    inCloudParams: {
+      model: CLOUD_MODEL_NAME,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: buildFlashcardsSchema(cardBounds),
         temperature: 0.3,
       },
     },
@@ -754,10 +1080,16 @@ async function runHybridTask<T>(
   let result: GenerateContentResult | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (deps?.signal?.aborted) {
+      throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+    }
     try {
       result = await model.generateContent(prompt);
       break;
     } catch (error) {
+      if (deps?.signal?.aborted) {
+        throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+      }
       if (params.mode === InferenceMode.ONLY_ON_DEVICE) {
         throw buildOnDeviceRecoveryError(error);
       }
@@ -789,6 +1121,10 @@ async function runHybridTask<T>(
     }
   }
 
+  if (deps?.signal?.aborted) {
+    throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+  }
+
   if (!result) {
     throw new HybridAiError(
       'INFERENCE_FAILED',
@@ -814,21 +1150,67 @@ async function runHybridTask<T>(
   return { parsed, telemetry };
 }
 
-function normalizeTimestampFields<
-  T extends { timestamp?: string; startSeconds?: number },
->(item: T): T & { timestamp: string; startSeconds: number } {
-  const ts = (item.timestamp ?? '').trim();
-  const hasNumeric =
-    typeof item.startSeconds === 'number' && Number.isFinite(item.startSeconds);
-  const startSeconds = hasNumeric
-    ? Math.max(0, Math.floor(item.startSeconds!))
-    : parseTimestampToSeconds(ts);
-  const timestamp = ts || formatTimestamp(startSeconds);
+function normalizeNotesPayload(parsed: StudyNotesData): StudyNotesData {
   return {
-    ...item,
-    timestamp,
-    startSeconds,
+    overview: (parsed.overview ?? '').trim(),
+    takeaways: Array.isArray(parsed.takeaways)
+      ? parsed.takeaways
+          .filter((item) => item && item.point)
+          .map((item) => normalizeTimestampFields(item))
+          .sort((a, b) => a.startSeconds - b.startSeconds)
+      : [],
+    definitions: Array.isArray(parsed.definitions)
+      ? parsed.definitions
+          .filter((item) => item && item.term && item.definition)
+          .map((item) => normalizeTimestampFields(item))
+          .sort((a, b) => a.startSeconds - b.startSeconds)
+      : [],
   };
+}
+
+function normalizeFlashcardsPayload(
+  parsed: FlashcardsData,
+  idPrefix = '',
+): FlashcardsData {
+  const rawCards = Array.isArray(parsed.cards) ? parsed.cards : [];
+  const cards: Flashcard[] = rawCards
+    .filter((c) => c && c.front && c.back)
+    .map((card, idx) => {
+      const rawId = (card.id ?? '').trim() || `card-${idx + 1}`;
+      return {
+        ...normalizeTimestampFields(card),
+        id: idPrefix ? `${idPrefix}${rawId}` : rawId,
+      };
+    })
+    .sort((a, b) => a.startSeconds - b.startSeconds);
+  return { cards };
+}
+
+function buildMapReduceChunks(
+  chunks: TranscriptChunk[],
+  fullText: string,
+): TranscriptChunk[] {
+  if (chunks.length > 0) {
+    return selectRepresentativeChunks(chunks, MAX_ON_DEVICE_CHAPTERS);
+  }
+  const cleaned = fullText.trim();
+  const plainChunks: TranscriptChunk[] = [];
+  for (let offset = 0; offset < cleaned.length; offset += ON_DEVICE_CHAR_LIMIT) {
+    const slice = cleaned.slice(offset, offset + ON_DEVICE_CHAR_LIMIT);
+    const idx = plainChunks.length + 1;
+    plainChunks.push({
+      id: `chunk-${idx}`,
+      label: `Part ${idx}`,
+      startTimestamp: '00:00',
+      endTimestamp: '00:00',
+      startSeconds: 0,
+      endSeconds: 0,
+      charCount: slice.length,
+      text: slice,
+      segments: [],
+    });
+  }
+  return selectRepresentativeChunks(plainChunks, MAX_ON_DEVICE_CHAPTERS);
 }
 
 // --- Public Hybrid AI Operations ---
@@ -846,12 +1228,23 @@ export async function extractStudyNotes(
     );
   }
 
+  const [takeawaysMin, takeawaysMax] = deps?.targetTakeaways ?? [4, 6];
+  const [definitionsMin, definitionsMax] = deps?.targetDefinitions ?? [3, 6];
+  const effectiveTakeawaysBounds: [number, number] = [
+    clampMinForLength(takeawaysMin, prepared.length),
+    takeawaysMax,
+  ];
+  const effectiveDefinitionsBounds: [number, number] = [
+    clampMinForLength(definitionsMin, prepared.length),
+    definitionsMax,
+  ];
+
   const prompt = [
     'You are an academic study assistant. Analyze the timestamped lecture or article excerpt below.',
     'Return ONLY valid JSON matching the requested schema:',
     '- overview: concise 1-2 sentence summary.',
-    '- takeaways: 4 to 6 key takeaways, each citing the closest [mm:ss] timestamp and integer startSeconds.',
-    '- definitions: 3 to 6 important technical terms with clear definitions and closest timestamp.',
+    `- takeaways: ${effectiveTakeawaysBounds[0]} to ${effectiveTakeawaysBounds[1]} key takeaways, each citing the closest [mm:ss] timestamp and integer startSeconds.`,
+    `- definitions: ${effectiveDefinitionsBounds[0]} to ${effectiveDefinitionsBounds[1]} important technical terms with clear definitions and closest timestamp.`,
     'If no timestamps appear in the source text, use "00:00" and 0.',
     '',
     'SOURCE CONTENT:',
@@ -860,26 +1253,126 @@ export async function extractStudyNotes(
 
   const { parsed, telemetry } = await runHybridTask<StudyNotesData>(
     'notes',
-    buildNotesModelParams(policy, deps?.onDownloadProgress),
+    buildNotesModelParams(
+      policy,
+      deps?.onDownloadProgress,
+      effectiveTakeawaysBounds,
+      effectiveDefinitionsBounds,
+    ),
     prompt,
     deps,
   );
 
-  const normalized: StudyNotesData = {
-    overview: (parsed.overview ?? '').trim(),
-    takeaways: Array.isArray(parsed.takeaways)
-      ? parsed.takeaways
-          .filter((item) => item && item.point)
-          .map((item) => normalizeTimestampFields(item))
-      : [],
-    definitions: Array.isArray(parsed.definitions)
-      ? parsed.definitions
-          .filter((item) => item && item.term && item.definition)
-          .map((item) => normalizeTimestampFields(item))
-      : [],
-  };
+  return { data: normalizeNotesPayload(parsed), telemetry };
+}
 
-  return { data: normalized, telemetry };
+/**
+ * Extracts study notes across the full lecture using on-device chapter
+ * map-reduce when Gemini Nano is ready (or Local-Only), or a single full-lecture
+ * Cloud call when falling back in Hybrid mode.
+ */
+export async function extractFullLectureStudyNotes(
+  chunks: TranscriptChunk[],
+  fullText: string,
+  policy: HybridRoutingPolicy,
+  deps?: HybridInferenceDeps,
+): Promise<HybridCallResult<StudyNotesData>> {
+  const cleaned = fullText.trim();
+  if (!cleaned) {
+    throw new HybridAiError(
+      'EMPTY_CONTENT',
+      'Capture a YouTube transcript or paste study text first.',
+    );
+  }
+
+  if (cleaned.length <= ON_DEVICE_CHAR_LIMIT) {
+    return extractStudyNotes(cleaned, policy, deps);
+  }
+
+  const availability =
+    policy === 'local-only'
+      ? 'available'
+      : await (deps?.checkAvailability ?? checkOnDeviceAvailability)();
+
+  if (policy === 'local-only' || availability === 'available') {
+    const workChunks = buildMapReduceChunks(chunks, cleaned);
+    let merged: StudyNotesData | undefined;
+    let totalLatencyMs = 0;
+    let anyLocal = false;
+    let fellBackToCloud = false;
+
+    for (let i = 0; i < workChunks.length; i++) {
+      if (deps?.signal?.aborted) {
+        throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+      }
+      const chunk = workChunks[i];
+      deps?.onChapterProgress?.(i + 1, workChunks.length, chunk.label);
+
+      const res = await extractStudyNotes(chunk.text, policy, {
+        ...deps,
+        targetTakeaways:
+          chunk.charCount >= 1800
+            ? [3, 4]
+            : chunk.charCount >= 600
+              ? [2, 3]
+              : [1, 2],
+        targetDefinitions: chunk.charCount >= 1800 ? [2, 3] : [1, 2],
+      });
+
+      totalLatencyMs += res.telemetry.latencyMs;
+      if (res.telemetry.source === 'ON_DEVICE') {
+        anyLocal = true;
+      }
+
+      if (
+        policy === 'hybrid' &&
+        i === 0 &&
+        workChunks.length > 1 &&
+        res.telemetry.source === 'IN_CLOUD'
+      ) {
+        fellBackToCloud = true;
+        break;
+      }
+
+      merged = mergeStudyNotes(merged, res.data);
+    }
+
+    if (!fellBackToCloud && merged) {
+      return {
+        data: merged,
+        telemetry: {
+          source: anyLocal ? 'ON_DEVICE' : 'IN_CLOUD',
+          latencyMs: totalLatencyMs,
+          task: 'notes',
+          modelLabel: anyLocal ? 'Gemini Nano' : CLOUD_MODEL_NAME,
+          timestamp: Date.now(),
+        },
+      };
+    }
+  }
+
+  const prepared = sampleFullLectureForWindow(cleaned, FULL_LECTURE_CHAR_LIMIT);
+  const targets = computeTargetCounts(cleaned.length);
+  const prompt = [
+    'You are an academic study assistant. Analyze the full timestamped lecture or article below.',
+    'Return ONLY valid JSON matching the requested schema:',
+    '- overview: concise 2-3 sentence synthesis covering the entire lecture.',
+    `- takeaways: ${targets.takeawaysMin} to ${targets.takeawaysMax} key takeaways distributed evenly from beginning to end, each citing the closest [mm:ss] timestamp and integer startSeconds.`,
+    `- definitions: ${targets.definitionsMin} to ${targets.definitionsMax} important technical terms across the full lecture with clear definitions and closest timestamp.`,
+    'If no timestamps appear in the source text, use "00:00" and 0.',
+    '',
+    'FULL LECTURE CONTENT:',
+    prepared,
+  ].join('\n');
+
+  const { parsed, telemetry } = await runHybridTask<StudyNotesData>(
+    'notes',
+    buildFullLectureNotesCloudParams(targets),
+    prompt,
+    deps,
+  );
+
+  return { data: normalizeNotesPayload(parsed), telemetry };
 }
 
 export async function generateFlashcards(
@@ -895,8 +1388,12 @@ export async function generateFlashcards(
     );
   }
 
+  const [cardsMin, cardsMax] = deps?.targetFlashcards ?? [5, 8];
+  const effectiveMin = clampMinForLength(cardsMin, prepared.length);
+  const effectiveCardBounds: [number, number] = [effectiveMin, cardsMax];
+
   const prompt = [
-    'You are an active-recall learning coach. Create 5 to 8 high-yield flashcards from the excerpt below.',
+    `You are an active-recall learning coach. Create ${effectiveMin} to ${cardsMax} distinct high-yield flashcards (at least ${effectiveMin} cards covering different concepts and timestamps) from the excerpt below.`,
     'Return ONLY valid JSON with a "cards" array.',
     'Each card must have: id, front (specific active-recall question), back (concise 1-3 sentence answer), timestamp (mm:ss), startSeconds (integer).',
     'If no timestamps appear in the source text, use "00:00" and 0.',
@@ -907,27 +1404,137 @@ export async function generateFlashcards(
 
   const { parsed, telemetry } = await runHybridTask<FlashcardsData>(
     'flashcards',
-    buildFlashcardsModelParams(policy, deps?.onDownloadProgress),
+    buildFlashcardsModelParams(
+      policy,
+      deps?.onDownloadProgress,
+      effectiveCardBounds,
+    ),
     prompt,
     deps,
   );
 
-  const rawCards = Array.isArray(parsed.cards) ? parsed.cards : [];
-  const cards: Flashcard[] = rawCards
-    .filter((c) => c && c.front && c.back)
-    .map((card, idx) => ({
-      ...normalizeTimestampFields(card),
-      id: (card.id ?? '').trim() || `card-${idx + 1}`,
-    }));
+  return {
+    data: normalizeFlashcardsPayload(parsed, deps?.idPrefix),
+    telemetry,
+  };
+}
 
-  return { data: { cards }, telemetry };
+/**
+ * Generates active-recall flashcards across the full lecture using on-device
+ * chapter map-reduce when Gemini Nano is ready (or Local-Only), or a single
+ * full-lecture Cloud call when falling back in Hybrid mode.
+ */
+export async function generateFullLectureFlashcards(
+  chunks: TranscriptChunk[],
+  fullText: string,
+  policy: HybridRoutingPolicy,
+  deps?: HybridInferenceDeps,
+): Promise<HybridCallResult<FlashcardsData>> {
+  const cleaned = fullText.trim();
+  if (!cleaned) {
+    throw new HybridAiError(
+      'EMPTY_CONTENT',
+      'Capture a YouTube transcript or paste study text first.',
+    );
+  }
+
+  if (cleaned.length <= ON_DEVICE_CHAR_LIMIT) {
+    return generateFlashcards(cleaned, policy, deps);
+  }
+
+  const availability =
+    policy === 'local-only'
+      ? 'available'
+      : await (deps?.checkAvailability ?? checkOnDeviceAvailability)();
+
+  if (policy === 'local-only' || availability === 'available') {
+    const workChunks = buildMapReduceChunks(chunks, cleaned);
+    let merged: FlashcardsData | undefined;
+    let totalLatencyMs = 0;
+    let anyLocal = false;
+    let fellBackToCloud = false;
+
+    for (let i = 0; i < workChunks.length; i++) {
+      if (deps?.signal?.aborted) {
+        throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+      }
+      const chunk = workChunks[i];
+      deps?.onChapterProgress?.(i + 1, workChunks.length, chunk.label);
+
+      const res = await generateFlashcards(chunk.text, policy, {
+        ...deps,
+        targetFlashcards:
+          chunk.charCount >= 1800
+            ? [3, 4]
+            : chunk.charCount >= 600
+              ? [2, 3]
+              : [1, 2],
+        idPrefix: `${chunk.id}-`,
+      });
+
+      totalLatencyMs += res.telemetry.latencyMs;
+      if (res.telemetry.source === 'ON_DEVICE') {
+        anyLocal = true;
+      }
+
+      if (
+        policy === 'hybrid' &&
+        i === 0 &&
+        workChunks.length > 1 &&
+        res.telemetry.source === 'IN_CLOUD'
+      ) {
+        fellBackToCloud = true;
+        break;
+      }
+
+      merged = mergeFlashcards(merged, res.data);
+    }
+
+    if (!fellBackToCloud && merged) {
+      return {
+        data: merged,
+        telemetry: {
+          source: anyLocal ? 'ON_DEVICE' : 'IN_CLOUD',
+          latencyMs: totalLatencyMs,
+          task: 'flashcards',
+          modelLabel: anyLocal ? 'Gemini Nano' : CLOUD_MODEL_NAME,
+          timestamp: Date.now(),
+        },
+      };
+    }
+  }
+
+  const prepared = sampleFullLectureForWindow(cleaned, FULL_LECTURE_CHAR_LIMIT);
+  const targets = computeTargetCounts(cleaned.length);
+  const prompt = [
+    `You are an active-recall learning coach. Create ${targets.flashcardsMin} to ${targets.flashcardsMax} high-yield flashcards covering the entire lecture from start to end.`,
+    'Return ONLY valid JSON with a "cards" array.',
+    'Each card must have: id, front (specific active-recall question), back (concise 1-3 sentence answer), timestamp (mm:ss), startSeconds (integer).',
+    'If no timestamps appear in the source text, use "00:00" and 0.',
+    '',
+    'FULL LECTURE CONTENT:',
+    prepared,
+  ].join('\n');
+
+  const { parsed, telemetry } = await runHybridTask<FlashcardsData>(
+    'flashcards',
+    buildFullLectureFlashcardsCloudParams([
+      targets.flashcardsMin,
+      targets.flashcardsMax,
+    ]),
+    prompt,
+    deps,
+  );
+
+  return { data: normalizeFlashcardsPayload(parsed), telemetry };
 }
 
 export async function generatePracticeQuiz(
   content: string,
   deps?: HybridInferenceDeps,
 ): Promise<HybridCallResult<QuizData>> {
-  const prepared = sampleFullLectureForWindow(content, FULL_LECTURE_CHAR_LIMIT);
+  const cleaned = content.trim();
+  const prepared = sampleFullLectureForWindow(cleaned, FULL_LECTURE_CHAR_LIMIT);
   if (!prepared) {
     throw new HybridAiError(
       'EMPTY_CONTENT',
@@ -935,9 +1542,14 @@ export async function generatePracticeQuiz(
     );
   }
 
+  const targetCount = Math.min(
+    15,
+    Math.max(5, deps?.questionCount ?? computeTargetCounts(cleaned.length).quizCount),
+  );
+
   const prompt = [
     'You are a university instructor creating a comprehensive assessment across the full lecture below.',
-    'Return ONLY valid JSON with a "questions" array of EXACTLY 5 multiple-choice questions.',
+    `Return ONLY valid JSON with a "questions" array of EXACTLY ${targetCount} multiple-choice questions distributed evenly across all sections and chapters.`,
     'Each question must include: id, question, options (array of 4 distinct choices), correctIndex (integer 0-3), explanation (why the answer is right), timestamp (mm:ss), and startSeconds (integer).',
     'If no timestamps appear in the source text, use "00:00" and 0.',
     '',
@@ -947,7 +1559,7 @@ export async function generatePracticeQuiz(
 
   const { parsed, telemetry } = await runHybridTask<QuizData>(
     'quiz',
-    buildQuizModelParams(),
+    buildQuizModelParams(targetCount),
     prompt,
     deps,
   );
@@ -955,7 +1567,7 @@ export async function generatePracticeQuiz(
   const rawQuestions = Array.isArray(parsed.questions) ? parsed.questions : [];
   const questions: QuizQuestion[] = rawQuestions
     .filter((q) => q && q.question && Array.isArray(q.options) && q.options.length >= 2)
-    .slice(0, 5)
+    .slice(0, targetCount)
     .map((q, idx) => {
       const options = q.options.slice(0, 4);
       const rawIdx = Number.isInteger(q.correctIndex) ? q.correctIndex : 0;
@@ -967,7 +1579,8 @@ export async function generatePracticeQuiz(
         correctIndex,
         explanation: (q.explanation ?? '').trim(),
       };
-    });
+    })
+    .sort((a, b) => a.startSeconds - b.startSeconds);
 
   return { data: { questions }, telemetry };
 }

@@ -13,6 +13,10 @@
     "https://www.youtube.com/*",
     "https://youtube.com/*"
   ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
   "side_panel": {
     "default_path": "src/sidepanel/index.html"
   },
@@ -45,17 +49,6 @@
         "src/content/youtube.ts"
       ],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "assets/*"
-      ],
-      "matches": [
-        "https://www.youtube.com/*",
-        "https://youtube.com/*"
-      ]
     }
   ]
 }

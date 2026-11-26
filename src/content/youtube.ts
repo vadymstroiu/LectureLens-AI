@@ -1,12 +1,16 @@
 import type {
   CaptureTranscriptResponse,
   ExtensionMessage,
+  GetVideoTimeResponse,
+  PauseVideoResponse,
   SeekVideoResponse,
   TranscriptSegment,
 } from '../types/lecture';
+import { findPrimaryYouTubeVideo } from './videoPlayer';
 import {
   extractCaptionTrackUrlFromHtml,
   extractVideoId,
+  formatTimestamp,
   mergeCaptionSegments,
   parseJson3Captions,
   parseTranscriptDomRow,
@@ -204,7 +208,34 @@ async function handleCaptureTranscript(): Promise<CaptureTranscriptResponse> {
 }
 
 function handleSeekVideo(startSeconds: number): SeekVideoResponse {
-  const video = document.querySelector<HTMLVideoElement>('video');
+  const video = findPrimaryYouTubeVideo();
+  if (
+    !video ||
+    (video.readyState === 0 &&
+      !(Number.isFinite(video.duration) && video.duration > 0))
+  ) {
+    return {
+      ok: false,
+      error: 'YouTube video player is not ready yet on this tab.',
+    };
+  }
+
+  const rawTarget = Number.isFinite(startSeconds)
+    ? Math.max(0, startSeconds)
+    : 0;
+  const safeTarget =
+    Number.isFinite(video.duration) && video.duration > 0
+      ? Math.min(rawTarget, Math.max(0, video.duration - 0.5))
+      : rawTarget;
+
+  video.currentTime = safeTarget;
+  void video.play().catch(() => undefined);
+
+  return { ok: true, currentTime: safeTarget };
+}
+
+function handleGetVideoTime(): GetVideoTimeResponse {
+  const video = findPrimaryYouTubeVideo();
   if (!video) {
     return {
       ok: false,
@@ -212,13 +243,22 @@ function handleSeekVideo(startSeconds: number): SeekVideoResponse {
     };
   }
 
-  const safeTarget = Number.isFinite(startSeconds)
-    ? Math.max(0, startSeconds)
+  const currentSeconds = Number.isFinite(video.currentTime)
+    ? Math.max(0, Math.floor(video.currentTime))
     : 0;
-  video.currentTime = safeTarget;
-  void video.play().catch(() => undefined);
+  return {
+    ok: true,
+    currentSeconds,
+    timestamp: formatTimestamp(currentSeconds),
+  };
+}
 
-  return { ok: true, currentTime: video.currentTime };
+function handlePauseVideo(): PauseVideoResponse {
+  const video = findPrimaryYouTubeVideo();
+  if (video && !video.paused) {
+    video.pause();
+  }
+  return { ok: true };
 }
 
 const globalState = globalThis as Record<string, unknown>;
@@ -229,7 +269,11 @@ if (!globalState[LISTENER_FLAG]) {
       message: ExtensionMessage,
       _sender,
       sendResponse: (
-        response: CaptureTranscriptResponse | SeekVideoResponse,
+        response:
+          | CaptureTranscriptResponse
+          | SeekVideoResponse
+          | GetVideoTimeResponse
+          | PauseVideoResponse,
       ) => void,
     ) => {
       if (!message || typeof message !== 'object') return false;
@@ -241,6 +285,16 @@ if (!globalState[LISTENER_FLAG]) {
 
       if (message.type === 'SEEK_VIDEO') {
         sendResponse(handleSeekVideo(message.startSeconds));
+        return false;
+      }
+
+      if (message.type === 'GET_VIDEO_TIME') {
+        sendResponse(handleGetVideoTime());
+        return false;
+      }
+
+      if (message.type === 'PAUSE_VIDEO') {
+        sendResponse(handlePauseVideo());
         return false;
       }
 

@@ -5,7 +5,16 @@ import { crx } from '@crxjs/vite-plugin';
 import manifest from './manifest.json';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), crx({ manifest })],
+  plugins: [
+    react(),
+    tailwindcss(),
+    crx({
+      manifest,
+      contentScripts: {
+        standaloneFiles: ['src/content/youtube.ts'],
+      },
+    }),
+  ],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
