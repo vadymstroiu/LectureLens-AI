@@ -104,6 +104,7 @@ export interface HybridInferenceDeps {
     completedChapters: number,
     totalChapters: number,
   ) => void;
+  distilledNotes?: StudyNotesData;
   targetTakeaways?: [number, number];
   targetDefinitions?: [number, number];
   targetFlashcards?: [number, number];
@@ -389,7 +390,7 @@ export function analyzeContentWindow(text: string): ContentWindowAnalysis {
         : fitsOnDevice
           ? 'Fits on-device window • Ready for Gemini Nano'
           : charCount > ON_DEVICE_CHAR_LIMIT * HYBRID_ON_DEVICE_MAX_CHAPTERS
-            ? 'Long lecture • Hybrid routes full synthesis to Cloud + Cloud Quiz (select a chapter for Nano)'
+            ? 'Long lecture • Hybrid uses Cloud Notes & Cloud Quiz + On-Device Nano Flashcards'
             : 'Long lecture • Cloud Quiz recommended (select a chapter for Nano)',
   };
 }
@@ -572,6 +573,33 @@ export function mergeStudyNotes(
       (a, b) => a.startSeconds - b.startSeconds,
     ),
   };
+}
+
+/**
+ * Formats extracted Cloud Study Notes into a compact timestamped summary
+ * (<6,000 chars) so Gemini Nano can synthesize flashcards locally in 1 pass.
+ */
+export function formatNotesForOnDeviceDistillation(
+  notes: StudyNotesData,
+): string {
+  const lines: string[] = [];
+  if (notes.overview.trim()) {
+    lines.push(`Overview: ${notes.overview.trim()}`);
+  }
+  for (const item of notes.takeaways) {
+    const point = item.point.trim();
+    if (!point) continue;
+    const ts = item.timestamp.trim() || '00:00';
+    lines.push(`[${ts}] Key takeaway: ${point}`);
+  }
+  for (const def of notes.definitions) {
+    const term = def.term.trim();
+    const definition = def.definition.trim();
+    if (!term || !definition) continue;
+    const ts = def.timestamp.trim() || '00:00';
+    lines.push(`[${ts}] ${term}: ${definition}`);
+  }
+  return lines.join('\n').trim();
 }
 
 /**
@@ -1634,7 +1662,24 @@ export async function generateFullLectureFlashcards(
     const shouldOffloadToCloud =
       policy === 'hybrid' && workChunks.length > HYBRID_ON_DEVICE_MAX_CHAPTERS;
 
-    if (!shouldOffloadToCloud) {
+    if (shouldOffloadToCloud) {
+      const distilledText = deps?.distilledNotes
+        ? formatNotesForOnDeviceDistillation(deps.distilledNotes)
+        : '';
+      if (distilledText) {
+        try {
+          return await generateFlashcards(distilledText, 'hybrid', {
+            ...deps,
+            targetFlashcards: [6, 8],
+          });
+        } catch (error) {
+          if (error instanceof HybridAiError && error.code === 'ABORTED') {
+            throw error;
+          }
+          // Fall through to full-lecture Cloud synthesis if Nano times out or fails
+        }
+      }
+    } else {
       let merged: FlashcardsData | undefined;
       let totalLatencyMs = 0;
       let anyLocal = false;

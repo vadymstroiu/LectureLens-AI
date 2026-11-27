@@ -615,6 +615,7 @@ export default function App() {
             policy,
             {
               signal: controller.signal,
+              distilledNotes: latestSession.notes,
               onDownloadProgress: handleModelDownloadProgress,
               onChapterProgress: (chapterIndex, totalChapters, chapterLabel) =>
                 setPipelineProgress({
@@ -1088,6 +1089,7 @@ export default function App() {
         policy,
         {
           signal: controller.signal,
+          distilledNotes: session.notes,
           onDownloadProgress: handleModelDownloadProgress,
           onChapterProgress: (chapterIndex, totalChapters, chapterLabel) =>
             setPipelineProgress({

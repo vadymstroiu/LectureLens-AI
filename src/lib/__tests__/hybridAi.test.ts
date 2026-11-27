@@ -24,6 +24,7 @@ import {
   extractStudyNotes,
   filterItemsByChunk,
   formatLatency,
+  formatNotesForOnDeviceDistillation,
   generateFlashcards,
   generateFullLectureFlashcards,
   generatePracticeQuiz,
@@ -1483,5 +1484,131 @@ describe('Full-lecture scaling, map-reduce, cancellation & chapter filtering', (
     });
     expect(ch11.percent).toBeGreaterThanOrEqual(90);
     expect(ch11.percent).toBeLessThanOrEqual(99);
+  });
+
+  it('uses 1-pass on-device Nano distillation for flashcards on long lectures when distilledNotes are provided, falling back to Cloud on timeout', async () => {
+    const longChunks = Array.from({ length: 11 }, (_, i) => ({
+      id: `chunk-${i + 1}`,
+      label: `Part ${i + 1}`,
+      startTimestamp: formatTimestamp(i * 300),
+      endTimestamp: formatTimestamp((i + 1) * 300),
+      startSeconds: i * 300,
+      endSeconds: (i + 1) * 300,
+      charCount: 5500,
+      text: `[${formatTimestamp(i * 300)}] Chapter ${i + 1} `.padEnd(5500, 'h'),
+      segments: [],
+    }));
+    const fullText11 = longChunks.map((c) => c.text).join('\n');
+
+    const distilledNotes = {
+      overview: 'Cloud-synthesized 59m lecture overview.',
+      takeaways: [
+        { point: 'Point A', timestamp: '04:10', startSeconds: 250 },
+        { point: 'Point B', timestamp: '41:20', startSeconds: 2480 },
+      ],
+      definitions: [
+        {
+          term: 'Distillation',
+          definition: 'Passing compact Cloud notes to on-device Nano.',
+          timestamp: '12:00',
+          startSeconds: 720,
+        },
+      ],
+    };
+
+    const formatted = formatNotesForOnDeviceDistillation(distilledNotes);
+    expect(formatted).toContain('Cloud-synthesized 59m lecture overview.');
+    expect(formatted).toContain('[04:10] Key takeaway: Point A');
+    expect(formatted).toContain('[12:00] Distillation: Passing compact Cloud notes to on-device Nano.');
+
+    let capturedMode: InferenceMode | undefined;
+    let capturedPrompt = '';
+    const nanoGenerate = vi.fn().mockImplementation(async (prompt: string) => {
+      capturedPrompt = prompt;
+      return createMockResult(
+        {
+          cards: [
+            {
+              id: 'c1',
+              front: 'What is Distillation?',
+              back: 'Passing compact Cloud notes to on-device Nano.',
+              timestamp: '12:00',
+              startSeconds: 720,
+            },
+          ],
+        },
+        InferenceSource.ON_DEVICE,
+      );
+    });
+
+    const distilledRes = await generateFullLectureFlashcards(
+      longChunks,
+      fullText11,
+      'hybrid',
+      {
+        ai: MOCK_AI,
+        distilledNotes,
+        checkAvailability: async () => 'available',
+        modelFactory: (_ai, params) => {
+          capturedMode = params.mode;
+          return { generateContent: nanoGenerate };
+        },
+      },
+    );
+
+    expect(nanoGenerate).toHaveBeenCalledTimes(1);
+    expect(capturedMode).toBe(InferenceMode.PREFER_ON_DEVICE);
+    expect(capturedPrompt).toContain('[41:20] Key takeaway: Point B');
+    expect(distilledRes.telemetry.source).toBe('ON_DEVICE');
+    expect(distilledRes.telemetry.modelLabel).toBe('Gemini Nano');
+
+    // Graceful Cloud fallback if the 1-pass on-device distilled call times out
+    const timeoutModes: InferenceMode[] = [];
+    const fallbackGenerate = vi
+      .fn()
+      .mockImplementation(async (_prompt: string, opts?: { signal?: AbortSignal }) => {
+        if (opts?.signal?.aborted) throw new Error('aborted');
+        if (fallbackGenerate.mock.calls.length === 1) {
+          return new Promise(() => {});
+        }
+        return createMockResult(
+          {
+            cards: [
+              {
+                id: 'cloud-c1',
+                front: 'Fallback question',
+                back: 'Cloud fallback succeeded.',
+                timestamp: '05:00',
+                startSeconds: 300,
+              },
+            ],
+          },
+          InferenceSource.IN_CLOUD,
+        );
+      });
+
+    const fallbackRes = await generateFullLectureFlashcards(
+      longChunks,
+      fullText11,
+      'hybrid',
+      {
+        ai: MOCK_AI,
+        distilledNotes,
+        checkAvailability: async () => 'available',
+        onDeviceTimeoutMs: 20,
+        modelFactory: (_ai, params) => {
+          timeoutModes.push(params.mode);
+          return { generateContent: fallbackGenerate };
+        },
+      },
+    );
+
+    expect(fallbackGenerate).toHaveBeenCalledTimes(2);
+    expect(timeoutModes).toEqual([
+      InferenceMode.PREFER_ON_DEVICE,
+      InferenceMode.ONLY_IN_CLOUD,
+    ]);
+    expect(fallbackRes.telemetry.source).toBe('IN_CLOUD');
+    expect(fallbackRes.data.cards[0].id).toBe('cloud-c1');
   });
 });
