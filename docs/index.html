@@ -106,13 +106,13 @@
             </div>
             <div class="telemetry-stats">
               <div class="stat-box">
-                <div class="stat-value" style="color: var(--emerald)">
+                <div class="stat-value stat-value-local">
                   Local: 2
                 </div>
                 <div class="stat-label">Gemini Nano (avg 22.7s)</div>
               </div>
               <div class="stat-box">
-                <div class="stat-value" style="color: var(--sky)">
+                <div class="stat-value stat-value-cloud">
                   Cloud: 1
                 </div>
                 <div class="stat-label">Gemini 3.8 Flash (4.4s)</div>
@@ -338,7 +338,6 @@
                   <img
                     src="./screenshots/turned-off.png"
                     alt="LectureLens AI showing Nano Unavailable with automatic Cloud Fallback"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -368,7 +367,6 @@
                   <img
                     src="./screenshots/turned-on.png"
                     alt="LectureLens AI detecting Chrome background Gemini Nano download"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -398,7 +396,6 @@
                   <img
                     src="./screenshots/download.png"
                     alt="LectureLens AI showing live Gemini Nano download percentage and elapsed timer"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -428,7 +425,6 @@
                   <img
                     src="./screenshots/ready.png"
                     alt="LectureLens AI showing Gemini Nano Ready status badge"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -463,7 +459,6 @@
                   <img
                     src="./screenshots/extract-notes.png"
                     alt="LectureLens AI extracting study notes on-device during Step 1 of 3 with Stop control"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -493,7 +488,6 @@
                   <img
                     src="./screenshots/text-extractor-from-page-or-copy-paste.png"
                     alt="LectureLens AI Paste and Selected Text drawer with Grab Page Selection button"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -523,7 +517,6 @@
                   <img
                     src="./screenshots/telemetry.png"
                     alt="LectureLens AI Hybrid Telemetry popover showing 67 percent local execution across Gemini Nano and Cloud Gemini"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -558,7 +551,6 @@
                   <img
                     src="./screenshots/extracted-notes.png"
                     alt="LectureLens AI Notes tab with Section Summary, Key Takeaways, Key Definitions, Personal Notes, and Export bar"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -588,7 +580,6 @@
                   <img
                     src="./screenshots/flesh-cards.png"
                     alt="LectureLens AI 3D interactive Active-Recall Flashcards tab"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -619,7 +610,6 @@
                   <img
                     src="./screenshots/quiz.png"
                     alt="LectureLens AI Quiz tab with answered questions, explanations, and Explain Simply Nano buttons"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -649,7 +639,6 @@
                   <img
                     src="./screenshots/history.png"
                     alt="LectureLens AI Study History drawer saved locally in Chrome profile"
-                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
                   />
                   <span class="shot-zoom-hint">Click to enlarge</span>
                 </button>
@@ -670,12 +659,12 @@
         </div>
       </section>
 
-      <!-- Judge Install Guide -->
+      <!-- Quick Start Install Guide -->
       <section id="install" class="section">
         <div class="container">
           <div class="section-head">
             <p class="section-eyebrow">Try It in Chrome</p>
-            <h2>3-Step Judge &amp; Developer Setup</h2>
+            <h2>3-Step Quick Start (Install in Chrome)</h2>
             <p>
               Requires desktop Chrome 138+ (with Built-in Prompt API flags
               enabled for local Gemini Nano) and a Firebase AI Logic project for
@@ -820,7 +809,7 @@ npm install &amp;&amp; npm run build</pre>
           </button>
         </div>
         <div class="lightbox-stage">
-          <img id="lightbox-img" src="" alt="" />
+          <img id="lightbox-img" alt="" />
         </div>
         <div class="lightbox-bar">
           <span id="lightbox-counter">1 / 1</span>
@@ -836,129 +825,6 @@ npm install &amp;&amp; npm run build</pre>
       </div>
     </div>
 
-    <script>
-      (function () {
-        const root = document.documentElement;
-        const toggle = document.getElementById('theme-toggle');
-        const saved = localStorage.getItem('lecturelens-docs-theme');
-        root.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
-
-        const syncIcon = () => {
-          const isDark = root.getAttribute('data-theme') === 'dark';
-          if (toggle) toggle.textContent = isDark ? '☀' : '🌙';
-        };
-        syncIcon();
-        toggle?.addEventListener('click', () => {
-          const next =
-            root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-          root.setAttribute('data-theme', next);
-          localStorage.setItem('lecturelens-docs-theme', next);
-          syncIcon();
-        });
-
-        document.querySelectorAll('.copy-btn').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const text = btn.getAttribute('data-copy');
-            if (!text || !navigator.clipboard) return;
-            try {
-              await navigator.clipboard.writeText(text);
-              const original = btn.textContent;
-              btn.textContent = 'Copied!';
-              setTimeout(() => {
-                btn.textContent = original;
-              }, 1500);
-            } catch {
-              // Ignore clipboard permission errors on file://
-            }
-          });
-        });
-
-        const lightbox = document.getElementById('shot-lightbox');
-        const lightboxImg = document.getElementById('lightbox-img');
-        const lightboxTitle = document.getElementById('lightbox-title');
-        const lightboxDesc = document.getElementById('lightbox-desc');
-        const lightboxCounter = document.getElementById('lightbox-counter');
-        const prevBtn = document.getElementById('lightbox-prev');
-        const nextBtn = document.getElementById('lightbox-next');
-        const closeBtn = document.getElementById('lightbox-close');
-        let activeTriggers = [];
-        let activeIndex = 0;
-        let lastFocused = null;
-
-        const getLoadedTriggers = () =>
-          Array.from(document.querySelectorAll('.shot-trigger')).filter(
-            (btn) => !btn.closest('.shot-card')?.classList.contains('is-missing'),
-          );
-
-        const renderLightbox = () => {
-          const trigger = activeTriggers[activeIndex];
-          const img = trigger?.querySelector('img');
-          if (!trigger || !img || !lightboxImg) return;
-          lightboxImg.src = img.getAttribute('src') || '';
-          lightboxImg.alt = img.getAttribute('alt') || '';
-          if (lightboxTitle) {
-            lightboxTitle.textContent =
-              trigger.getAttribute('data-shot-title') || 'Screenshot';
-          }
-          if (lightboxDesc) {
-            lightboxDesc.textContent =
-              trigger.getAttribute('data-shot-desc') || '';
-          }
-          if (lightboxCounter) {
-            lightboxCounter.textContent = `${activeIndex + 1} / ${activeTriggers.length}`;
-          }
-        };
-
-        const openLightbox = (trigger) => {
-          activeTriggers = getLoadedTriggers();
-          activeIndex = activeTriggers.indexOf(trigger);
-          if (activeIndex < 0 || !lightbox) return;
-          lastFocused = document.activeElement;
-          renderLightbox();
-          lightbox.hidden = false;
-          closeBtn?.focus();
-        };
-
-        const closeLightbox = () => {
-          if (!lightbox || lightbox.hidden) return;
-          lightbox.hidden = true;
-          if (lastFocused instanceof HTMLElement) {
-            lastFocused.focus();
-          }
-        };
-
-        const stepLightbox = (delta) => {
-          if (!activeTriggers.length) return;
-          activeIndex =
-            (activeIndex + delta + activeTriggers.length) %
-            activeTriggers.length;
-          renderLightbox();
-        };
-
-        document.querySelectorAll('.shot-trigger').forEach((trigger) => {
-          trigger.addEventListener('click', () => openLightbox(trigger));
-        });
-
-        closeBtn?.addEventListener('click', closeLightbox);
-        prevBtn?.addEventListener('click', () => stepLightbox(-1));
-        nextBtn?.addEventListener('click', () => stepLightbox(1));
-        lightbox?.addEventListener('click', (e) => {
-          if (e.target === lightbox) closeLightbox();
-        });
-        window.addEventListener('keydown', (e) => {
-          if (!lightbox || lightbox.hidden) return;
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            closeLightbox();
-          } else if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            stepLightbox(-1);
-          } else if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            stepLightbox(1);
-          }
-        });
-      })();
-    </script>
+    <script src="./app.js" defer></script>
   </body>
 </html>

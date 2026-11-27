@@ -821,6 +821,14 @@ pre {
   text-decoration: underline;
 }
 
+.stat-value-local {
+  color: var(--emerald);
+}
+
+.stat-value-cloud {
+  color: var(--sky);
+}
+
 @media (max-width: 900px) {
   .hero-grid,
   .grid-3 {
