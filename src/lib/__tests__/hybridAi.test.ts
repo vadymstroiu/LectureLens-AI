@@ -17,6 +17,7 @@ import {
   chunkTranscriptSegments,
   CLOUD_MODEL_NAME,
   computeExecutionProgress,
+  computePipelineExecutionProgress,
   computeTargetCounts,
   explainConceptSimply,
   extractFullLectureStudyNotes,
@@ -26,6 +27,7 @@ import {
   generateFlashcards,
   generateFullLectureFlashcards,
   generatePracticeQuiz,
+  HYBRID_ON_DEVICE_MAX_CHAPTERS,
   HybridAiError,
   MAX_ON_DEVICE_CHAPTERS,
   mergeFlashcards,
@@ -1223,7 +1225,7 @@ describe('Full-lecture scaling, map-reduce, cancellation & chapter filtering', (
     const cardsRes = await generateFullLectureFlashcards(
       nineChunks,
       fullText9,
-      'hybrid',
+      'local-only',
       {
         ai: MOCK_AI,
         checkAvailability: async () => 'available',
@@ -1274,5 +1276,212 @@ describe('Full-lecture scaling, map-reduce, cancellation & chapter filtering', (
       { point: 'First takeaway', timestamp: '05:33', startSeconds: 333 },
       { point: 'Second takeaway', timestamp: '12:36', startSeconds: 756 },
     ]);
+  });
+
+  it('offloads long >3 chapter lectures to single-call Cloud in hybrid mode for Notes & Flashcards', async () => {
+    expect(HYBRID_ON_DEVICE_MAX_CHAPTERS).toBe(3);
+
+    const longChunks = Array.from({ length: 11 }, (_, i) => ({
+      id: `chunk-${i + 1}`,
+      label: `Part ${i + 1}`,
+      startTimestamp: formatTimestamp(i * 300),
+      endTimestamp: formatTimestamp((i + 1) * 300),
+      startSeconds: i * 300,
+      endSeconds: (i + 1) * 300,
+      charCount: 5500,
+      text: `[${formatTimestamp(i * 300)}] Chapter ${i + 1} `.padEnd(5500, 'e'),
+      segments: [],
+    }));
+    const fullText11 = longChunks.map((c) => c.text).join('\n');
+
+    const capturedModes: InferenceMode[] = [];
+    const notesGenerate = vi.fn().mockResolvedValue(
+      createMockResult(
+        {
+          overview: 'Full 59m cloud overview.',
+          takeaways: [{ point: 'Cloud takeaway', timestamp: '10:00', startSeconds: 600 }],
+          definitions: [
+            {
+              term: 'Cloud Synthesis',
+              definition: 'Fast full-lecture pass.',
+              timestamp: '20:00',
+              startSeconds: 1200,
+            },
+          ],
+        },
+        InferenceSource.IN_CLOUD,
+      ),
+    );
+
+    const notesRes = await extractFullLectureStudyNotes(longChunks, fullText11, 'hybrid', {
+      ai: MOCK_AI,
+      checkAvailability: async () => 'available',
+      modelFactory: (_ai, params) => {
+        capturedModes.push(params.mode);
+        return { generateContent: notesGenerate };
+      },
+    });
+    expect(notesGenerate).toHaveBeenCalledTimes(1);
+    expect(capturedModes[0]).toBe(InferenceMode.ONLY_IN_CLOUD);
+    expect(notesRes.telemetry.source).toBe('IN_CLOUD');
+
+    const cardsGenerate = vi.fn().mockResolvedValue(
+      createMockResult(
+        {
+          cards: [
+            {
+              id: 'c1',
+              front: 'Q1',
+              back: 'A1',
+              timestamp: '05:00',
+              startSeconds: 300,
+            },
+          ],
+        },
+        InferenceSource.IN_CLOUD,
+      ),
+    );
+    const cardsRes = await generateFullLectureFlashcards(
+      longChunks,
+      fullText11,
+      'hybrid',
+      {
+        ai: MOCK_AI,
+        checkAvailability: async () => 'available',
+        modelFactory: (_ai, params) => {
+          capturedModes.push(params.mode);
+          return { generateContent: cardsGenerate };
+        },
+      },
+    );
+    expect(cardsGenerate).toHaveBeenCalledTimes(1);
+    expect(capturedModes[1]).toBe(InferenceMode.ONLY_IN_CLOUD);
+    expect(cardsRes.telemetry.source).toBe('IN_CLOUD');
+  });
+
+  it('saves completed chapters progressively via callbacks and aborts hung chapters immediately', async () => {
+    const twoChunks = Array.from({ length: 2 }, (_, i) => ({
+      id: `chunk-${i + 1}`,
+      label: `Part ${i + 1}`,
+      startTimestamp: formatTimestamp(i * 300),
+      endTimestamp: formatTimestamp((i + 1) * 300),
+      startSeconds: i * 300,
+      endSeconds: (i + 1) * 300,
+      charCount: 5500,
+      text: `[${formatTimestamp(i * 300)}] Chapter ${i + 1} `.padEnd(5500, 'f'),
+      segments: [],
+    }));
+    const fullText = twoChunks.map((c) => c.text).join('\n');
+
+    const controller = new AbortController();
+    const partialSaves: Array<{ takeaways: number; completed: number; total: number }> = [];
+
+    const generateContent = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        createMockResult(
+          {
+            overview: 'Chapter 1 overview',
+            takeaways: [
+              { point: 'Saved takeaway 1', timestamp: '00:10', startSeconds: 10 },
+            ],
+            definitions: [],
+          },
+          InferenceSource.ON_DEVICE,
+        ),
+      )
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    const promise = extractFullLectureStudyNotes(twoChunks, fullText, 'local-only', {
+      ai: MOCK_AI,
+      signal: controller.signal,
+      checkAvailability: async () => 'available',
+      onDeviceTimeoutMs: 0,
+      onChapterProgress: (chapterIndex) => {
+        if (chapterIndex === 2) {
+          queueMicrotask(() => controller.abort());
+        }
+      },
+      onPartialNotes: (data, completed, total) => {
+        partialSaves.push({
+          takeaways: data.takeaways.length,
+          completed,
+          total,
+        });
+      },
+      modelFactory: () => ({ generateContent }),
+    });
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'HybridAiError',
+      code: 'ABORTED',
+    });
+    expect(partialSaves).toEqual([{ takeaways: 1, completed: 1, total: 2 }]);
+  });
+
+  it('falls back to Cloud in hybrid mode when an on-device call hits onDeviceTimeoutMs', async () => {
+    const threeChunks = Array.from({ length: 3 }, (_, i) => ({
+      id: `chunk-${i + 1}`,
+      label: `Part ${i + 1}`,
+      startTimestamp: formatTimestamp(i * 300),
+      endTimestamp: formatTimestamp((i + 1) * 300),
+      startSeconds: i * 300,
+      endSeconds: (i + 1) * 300,
+      charCount: 5500,
+      text: `[${formatTimestamp(i * 300)}] Chapter ${i + 1} `.padEnd(5500, 'g'),
+      segments: [],
+    }));
+    const fullText = threeChunks.map((c) => c.text).join('\n');
+
+    const generateContent = vi.fn().mockImplementation(async (_prompt, opts?: { signal?: AbortSignal }) => {
+      if (opts?.signal?.aborted) {
+        throw new Error('aborted');
+      }
+      if (generateContent.mock.calls.length === 1) {
+        return new Promise(() => {});
+      }
+      return createMockResult(
+        {
+          overview: 'Recovered via Cloud',
+          takeaways: [{ point: 'Cloud fallback takeaway', timestamp: '00:15', startSeconds: 15 }],
+          definitions: [],
+        },
+        InferenceSource.IN_CLOUD,
+      );
+    });
+
+    const res = await extractFullLectureStudyNotes(threeChunks, fullText, 'hybrid', {
+      ai: MOCK_AI,
+      checkAvailability: async () => 'available',
+      onDeviceTimeoutMs: 20,
+      modelFactory: () => ({ generateContent }),
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(res.telemetry.source).toBe('IN_CLOUD');
+    expect(res.data.overview).toBe('Recovered via Cloud');
+  });
+
+  it('computes chapter-banded pipeline progress so chapter 3/11 stays under 30% instead of pinning at 95%', () => {
+    const ch3 = computePipelineExecutionProgress({
+      elapsedMs: 120_000,
+      chapterElapsedMs: 60_000,
+      chapterIndex: 3,
+      totalChapters: 11,
+      expectedMs: 15_000,
+    });
+    expect(ch3.percent).toBeGreaterThanOrEqual(18);
+    expect(ch3.percent).toBeLessThan(30);
+    expect(ch3.percent + ch3.remainingPercent).toBe(100);
+
+    const ch11 = computePipelineExecutionProgress({
+      elapsedMs: 300_000,
+      chapterElapsedMs: 60_000,
+      chapterIndex: 11,
+      totalChapters: 11,
+      expectedMs: 15_000,
+    });
+    expect(ch11.percent).toBeGreaterThanOrEqual(90);
+    expect(ch11.percent).toBeLessThanOrEqual(99);
   });
 });

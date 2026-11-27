@@ -30,6 +30,8 @@ export const ON_DEVICE_CHAR_LIMIT = 6000;
 export const FULL_LECTURE_CHAR_LIMIT = 60000;
 export const ALL_CHAPTERS_ID = 'all';
 export const MAX_ON_DEVICE_CHAPTERS = 12;
+export const HYBRID_ON_DEVICE_MAX_CHAPTERS = 3;
+export const ON_DEVICE_CALL_TIMEOUT_MS = 45_000;
 export const CLOUD_MODEL_NAME =
   (import.meta.env.VITE_FIREBASE_CLOUD_MODEL ?? '').trim() ||
   'gemini-3.8-flash';
@@ -41,6 +43,7 @@ export type HybridAiErrorCode =
   | 'EMPTY_CONTENT'
   | 'INVALID_RESPONSE'
   | 'ABORTED'
+  | 'TIMEOUT'
   | 'INFERENCE_FAILED';
 
 export class HybridAiError extends Error {
@@ -90,6 +93,17 @@ export interface HybridInferenceDeps {
   checkAvailability?: () => Promise<OnDeviceAvailability>;
   signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
+  onDeviceTimeoutMs?: number;
+  onPartialNotes?: (
+    data: StudyNotesData,
+    completedChapters: number,
+    totalChapters: number,
+  ) => void;
+  onPartialFlashcards?: (
+    data: FlashcardsData,
+    completedChapters: number,
+    totalChapters: number,
+  ) => void;
   targetTakeaways?: [number, number];
   targetDefinitions?: [number, number];
   targetFlashcards?: [number, number];
@@ -374,7 +388,9 @@ export function analyzeContentWindow(text: string): ContentWindowAnalysis {
         ? 'Capture a YouTube transcript or paste text to begin.'
         : fitsOnDevice
           ? 'Fits on-device window • Ready for Gemini Nano'
-          : 'Long lecture • Cloud Quiz recommended (select a chapter for Nano)',
+          : charCount > ON_DEVICE_CHAR_LIMIT * HYBRID_ON_DEVICE_MAX_CHAPTERS
+            ? 'Long lecture • Hybrid routes full synthesis to Cloud + Cloud Quiz (select a chapter for Nano)'
+            : 'Long lecture • Cloud Quiz recommended (select a chapter for Nano)',
   };
 }
 
@@ -645,6 +661,38 @@ export function computeExecutionProgress(
 }
 
 /**
+ * Computes overall progress across multi-chapter AI execution so long
+ * lectures advance smoothly through each chapter band instead of pinning at 95%.
+ */
+export function computePipelineExecutionProgress(params: {
+  elapsedMs: number;
+  chapterElapsedMs?: number;
+  chapterIndex?: number;
+  totalChapters?: number;
+  expectedMs?: number;
+}): { percent: number; remainingPercent: number } {
+  const { elapsedMs, chapterElapsedMs, chapterIndex, totalChapters, expectedMs } =
+    params;
+  if (totalChapters && totalChapters > 1 && chapterIndex && chapterIndex >= 1) {
+    const completed = Math.min(totalChapters - 1, Math.max(0, chapterIndex - 1));
+    const withinChapter =
+      computeExecutionProgress(
+        chapterElapsedMs ?? elapsedMs,
+        expectedMs ?? 15_000,
+      ).percent / 100;
+    const percent = Math.min(
+      99,
+      Math.max(1, Math.round(((completed + withinChapter) / totalChapters) * 100)),
+    );
+    return {
+      percent,
+      remainingPercent: 100 - percent,
+    };
+  }
+  return computeExecutionProgress(elapsedMs, expectedMs);
+}
+
+/**
  * Explicitly initiates/monitors Chrome's Gemini Nano download from a user click.
  */
 export async function triggerOnDeviceDownload(
@@ -755,9 +803,11 @@ export function parseStructuredJson<T>(rawText: string): T {
 
 function buildOnDeviceCreateOptions(
   onDownloadProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ) {
   return {
     ...DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS,
+    ...(signal ? { signal } : {}),
     ...(onDownloadProgress
       ? {
           monitor: (m: {
@@ -784,6 +834,7 @@ export function buildNotesModelParams(
   onDownloadProgress?: (percent: number) => void,
   takeawaysBounds?: [number, number],
   definitionsBounds?: [number, number],
+  signal?: AbortSignal,
 ): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
@@ -799,7 +850,7 @@ export function buildNotesModelParams(
       },
     },
     onDeviceParams: {
-      createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
+      createOptions: buildOnDeviceCreateOptions(onDownloadProgress, signal),
       promptOptions: {
         responseConstraint: buildStudyNotesJsonConstraint(
           takeawaysBounds,
@@ -814,6 +865,7 @@ export function buildFlashcardsModelParams(
   policy: HybridRoutingPolicy,
   onDownloadProgress?: (percent: number) => void,
   cardBounds?: [number, number],
+  signal?: AbortSignal,
 ): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
@@ -826,7 +878,7 @@ export function buildFlashcardsModelParams(
       },
     },
     onDeviceParams: {
-      createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
+      createOptions: buildOnDeviceCreateOptions(onDownloadProgress, signal),
       promptOptions: {
         responseConstraint: buildFlashcardsJsonConstraint(cardBounds),
       },
@@ -898,6 +950,7 @@ export function buildFullLectureFlashcardsCloudParams(
 export function buildExplainModelParams(
   policy: HybridRoutingPolicy,
   onDownloadProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ): HybridParams {
   return {
     mode: resolveLocalFirstMode(policy),
@@ -910,7 +963,7 @@ export function buildExplainModelParams(
       },
     },
     onDeviceParams: {
-      createOptions: buildOnDeviceCreateOptions(onDownloadProgress),
+      createOptions: buildOnDeviceCreateOptions(onDownloadProgress, signal),
       promptOptions: {
         responseConstraint: SIMPLE_EXPLANATION_JSON_CONSTRAINT,
       },
@@ -1070,6 +1123,39 @@ export function sampleFullLectureForWindow(
   return spans.join(separator).slice(0, maxChars);
 }
 
+/**
+ * Races an async AI call against an AbortSignal so cancelling or timing out
+ * unblocks the UI immediately even if the underlying browser call hangs.
+ */
+function raceWithSignal<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  createAbortError: () => Error,
+): Promise<T> {
+  if (signal.aborted) {
+    promise.catch(() => {});
+    return Promise.reject(createAbortError());
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      promise.catch(() => {});
+      reject(createAbortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 async function runHybridTask<T>(
   task: StudyTaskKind,
   params: HybridParams,
@@ -1094,7 +1180,6 @@ async function runHybridTask<T>(
     deps?.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-  const model = factory(ai, params);
   const startMs = now();
 
   const maxRetries = params.mode === InferenceMode.ONLY_ON_DEVICE ? 0 : 2;
@@ -1104,12 +1189,61 @@ async function runHybridTask<T>(
     if (deps?.signal?.aborted) {
       throw new HybridAiError('ABORTED', 'Generation was cancelled.');
     }
+
+    const attemptController = new AbortController();
+    let timedOut = false;
+    const onExternalAbort = () => attemptController.abort();
+    deps?.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    const timeoutMs =
+      params.mode !== InferenceMode.ONLY_IN_CLOUD
+        ? (deps?.onDeviceTimeoutMs ?? ON_DEVICE_CALL_TIMEOUT_MS)
+        : 0;
+    const timeoutId =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            attemptController.abort();
+          }, timeoutMs)
+        : undefined;
+
     try {
-      result = await model.generateContent(prompt);
+      const effectiveParams: HybridParams = params.onDeviceParams
+        ? {
+            ...params,
+            onDeviceParams: {
+              ...params.onDeviceParams,
+              createOptions: {
+                ...params.onDeviceParams.createOptions,
+                signal: attemptController.signal,
+              },
+            },
+          }
+        : params;
+      const model = factory(ai, effectiveParams);
+      result = await raceWithSignal(
+        model.generateContent(prompt, { signal: attemptController.signal }),
+        attemptController.signal,
+        () =>
+          timedOut
+            ? new HybridAiError(
+                'TIMEOUT',
+                `On-device generation timed out during ${task}.`,
+                'Select a single chapter for faster Gemini Nano runs, or switch to Hybrid (Auto) for fast Cloud Gemini synthesis.',
+              )
+            : new HybridAiError('ABORTED', 'Generation was cancelled.'),
+      );
       break;
     } catch (error) {
       if (deps?.signal?.aborted) {
         throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+      }
+      if (timedOut) {
+        throw new HybridAiError(
+          'TIMEOUT',
+          `On-device generation timed out during ${task}.`,
+          'Select a single chapter for faster Gemini Nano runs, or switch to Hybrid (Auto) for fast Cloud Gemini synthesis.',
+        );
       }
       if (params.mode === InferenceMode.ONLY_ON_DEVICE) {
         throw buildOnDeviceRecoveryError(error);
@@ -1139,6 +1273,11 @@ async function runHybridTask<T>(
           ? 'The cloud Gemini model is temporarily busy due to high demand. Wait a few seconds and retry — once Gemini Nano finishes downloading, Notes and Flashcards run 100% on-device with zero cloud spikes.'
           : 'Check your network connection, Firebase AI Logic API enablement, and App Check debug token.',
       );
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      deps?.signal?.removeEventListener('abort', onExternalAbort);
     }
   }
 
@@ -1317,58 +1456,80 @@ export async function extractFullLectureStudyNotes(
 
   if (policy === 'local-only' || availability === 'available') {
     const workChunks = buildMapReduceChunks(chunks, cleaned);
-    let merged: StudyNotesData | undefined;
-    let totalLatencyMs = 0;
-    let anyLocal = false;
-    let fellBackToCloud = false;
+    const shouldOffloadToCloud =
+      policy === 'hybrid' && workChunks.length > HYBRID_ON_DEVICE_MAX_CHAPTERS;
 
-    for (let i = 0; i < workChunks.length; i++) {
-      if (deps?.signal?.aborted) {
-        throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+    if (!shouldOffloadToCloud) {
+      let merged: StudyNotesData | undefined;
+      let totalLatencyMs = 0;
+      let anyLocal = false;
+      let fellBackToCloud = false;
+
+      for (let i = 0; i < workChunks.length; i++) {
+        if (deps?.signal?.aborted) {
+          throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+        }
+        const chunk = workChunks[i];
+        deps?.onChapterProgress?.(i + 1, workChunks.length, chunk.label);
+
+        try {
+          const res = await extractStudyNotes(chunk.text, policy, {
+            ...deps,
+            targetTakeaways:
+              chunk.charCount >= 1800
+                ? [3, 4]
+                : chunk.charCount >= 600
+                  ? [2, 3]
+                  : [1, 2],
+            targetDefinitions: chunk.charCount >= 1800 ? [2, 3] : [1, 2],
+          });
+
+          totalLatencyMs += res.telemetry.latencyMs;
+          if (res.telemetry.source === 'ON_DEVICE') {
+            anyLocal = true;
+          }
+
+          if (
+            policy === 'hybrid' &&
+            i === 0 &&
+            workChunks.length > 1 &&
+            res.telemetry.source === 'IN_CLOUD'
+          ) {
+            fellBackToCloud = true;
+            break;
+          }
+
+          merged = mergeStudyNotes(merged, res.data);
+          deps?.onPartialNotes?.(merged, i + 1, workChunks.length);
+        } catch (error) {
+          if (error instanceof HybridAiError && error.code === 'ABORTED') {
+            throw error;
+          }
+          if (error instanceof HybridAiError && error.code === 'TIMEOUT') {
+            if (policy === 'hybrid') {
+              fellBackToCloud = true;
+              break;
+            }
+            if (merged) {
+              continue;
+            }
+          }
+          throw error;
+        }
       }
-      const chunk = workChunks[i];
-      deps?.onChapterProgress?.(i + 1, workChunks.length, chunk.label);
 
-      const res = await extractStudyNotes(chunk.text, policy, {
-        ...deps,
-        targetTakeaways:
-          chunk.charCount >= 1800
-            ? [3, 4]
-            : chunk.charCount >= 600
-              ? [2, 3]
-              : [1, 2],
-        targetDefinitions: chunk.charCount >= 1800 ? [2, 3] : [1, 2],
-      });
-
-      totalLatencyMs += res.telemetry.latencyMs;
-      if (res.telemetry.source === 'ON_DEVICE') {
-        anyLocal = true;
+      if (!fellBackToCloud && merged) {
+        return {
+          data: merged,
+          telemetry: {
+            source: anyLocal ? 'ON_DEVICE' : 'IN_CLOUD',
+            latencyMs: totalLatencyMs,
+            task: 'notes',
+            modelLabel: anyLocal ? 'Gemini Nano' : CLOUD_MODEL_NAME,
+            timestamp: Date.now(),
+          },
+        };
       }
-
-      if (
-        policy === 'hybrid' &&
-        i === 0 &&
-        workChunks.length > 1 &&
-        res.telemetry.source === 'IN_CLOUD'
-      ) {
-        fellBackToCloud = true;
-        break;
-      }
-
-      merged = mergeStudyNotes(merged, res.data);
-    }
-
-    if (!fellBackToCloud && merged) {
-      return {
-        data: merged,
-        telemetry: {
-          source: anyLocal ? 'ON_DEVICE' : 'IN_CLOUD',
-          latencyMs: totalLatencyMs,
-          task: 'notes',
-          modelLabel: anyLocal ? 'Gemini Nano' : CLOUD_MODEL_NAME,
-          timestamp: Date.now(),
-        },
-      };
     }
   }
 
@@ -1470,58 +1631,80 @@ export async function generateFullLectureFlashcards(
 
   if (policy === 'local-only' || availability === 'available') {
     const workChunks = buildMapReduceChunks(chunks, cleaned);
-    let merged: FlashcardsData | undefined;
-    let totalLatencyMs = 0;
-    let anyLocal = false;
-    let fellBackToCloud = false;
+    const shouldOffloadToCloud =
+      policy === 'hybrid' && workChunks.length > HYBRID_ON_DEVICE_MAX_CHAPTERS;
 
-    for (let i = 0; i < workChunks.length; i++) {
-      if (deps?.signal?.aborted) {
-        throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+    if (!shouldOffloadToCloud) {
+      let merged: FlashcardsData | undefined;
+      let totalLatencyMs = 0;
+      let anyLocal = false;
+      let fellBackToCloud = false;
+
+      for (let i = 0; i < workChunks.length; i++) {
+        if (deps?.signal?.aborted) {
+          throw new HybridAiError('ABORTED', 'Generation was cancelled.');
+        }
+        const chunk = workChunks[i];
+        deps?.onChapterProgress?.(i + 1, workChunks.length, chunk.label);
+
+        try {
+          const res = await generateFlashcards(chunk.text, policy, {
+            ...deps,
+            targetFlashcards:
+              chunk.charCount >= 1800
+                ? [3, 4]
+                : chunk.charCount >= 600
+                  ? [2, 3]
+                  : [1, 2],
+            idPrefix: `${chunk.id}-`,
+          });
+
+          totalLatencyMs += res.telemetry.latencyMs;
+          if (res.telemetry.source === 'ON_DEVICE') {
+            anyLocal = true;
+          }
+
+          if (
+            policy === 'hybrid' &&
+            i === 0 &&
+            workChunks.length > 1 &&
+            res.telemetry.source === 'IN_CLOUD'
+          ) {
+            fellBackToCloud = true;
+            break;
+          }
+
+          merged = mergeFlashcards(merged, res.data);
+          deps?.onPartialFlashcards?.(merged, i + 1, workChunks.length);
+        } catch (error) {
+          if (error instanceof HybridAiError && error.code === 'ABORTED') {
+            throw error;
+          }
+          if (error instanceof HybridAiError && error.code === 'TIMEOUT') {
+            if (policy === 'hybrid') {
+              fellBackToCloud = true;
+              break;
+            }
+            if (merged) {
+              continue;
+            }
+          }
+          throw error;
+        }
       }
-      const chunk = workChunks[i];
-      deps?.onChapterProgress?.(i + 1, workChunks.length, chunk.label);
 
-      const res = await generateFlashcards(chunk.text, policy, {
-        ...deps,
-        targetFlashcards:
-          chunk.charCount >= 1800
-            ? [3, 4]
-            : chunk.charCount >= 600
-              ? [2, 3]
-              : [1, 2],
-        idPrefix: `${chunk.id}-`,
-      });
-
-      totalLatencyMs += res.telemetry.latencyMs;
-      if (res.telemetry.source === 'ON_DEVICE') {
-        anyLocal = true;
+      if (!fellBackToCloud && merged) {
+        return {
+          data: merged,
+          telemetry: {
+            source: anyLocal ? 'ON_DEVICE' : 'IN_CLOUD',
+            latencyMs: totalLatencyMs,
+            task: 'flashcards',
+            modelLabel: anyLocal ? 'Gemini Nano' : CLOUD_MODEL_NAME,
+            timestamp: Date.now(),
+          },
+        };
       }
-
-      if (
-        policy === 'hybrid' &&
-        i === 0 &&
-        workChunks.length > 1 &&
-        res.telemetry.source === 'IN_CLOUD'
-      ) {
-        fellBackToCloud = true;
-        break;
-      }
-
-      merged = mergeFlashcards(merged, res.data);
-    }
-
-    if (!fellBackToCloud && merged) {
-      return {
-        data: merged,
-        telemetry: {
-          source: anyLocal ? 'ON_DEVICE' : 'IN_CLOUD',
-          latencyMs: totalLatencyMs,
-          task: 'flashcards',
-          modelLabel: anyLocal ? 'Gemini Nano' : CLOUD_MODEL_NAME,
-          timestamp: Date.now(),
-        },
-      };
     }
   }
 

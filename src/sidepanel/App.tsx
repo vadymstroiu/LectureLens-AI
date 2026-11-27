@@ -126,7 +126,9 @@ export default function App() {
   const [explainingKey, setExplainingKey] = useState<string | null>(null);
   const [downloadingNano, setDownloadingNano] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [stoppingGeneration, setStoppingGeneration] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [chapterElapsedMs, setChapterElapsedMs] = useState(0);
   const [errorState, setErrorState] = useState<ErrorBannerState | null>(null);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
@@ -227,6 +229,22 @@ export default function App() {
 
     return () => window.clearInterval(timer);
   }, [loadingTask, downloadingNano]);
+
+  // Track elapsed time within the current chapter for smooth multi-chapter %
+  useEffect(() => {
+    if (!loadingTask) {
+      setChapterElapsedMs(0);
+      return;
+    }
+
+    const startedAt = performance.now();
+    setChapterElapsedMs(100);
+    const timer = window.setInterval(() => {
+      setChapterElapsedMs(performance.now() - startedAt);
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [loadingTask, pipelineProgress?.stage, pipelineProgress?.chapterIndex]);
 
   const handleDownloadNano = async () => {
     downloadAbortRef.current?.abort();
@@ -503,7 +521,9 @@ export default function App() {
   }, [activeChunk, chunks, selectedChunkId, session?.quiz]);
 
   const handleCancelGeneration = () => {
-    abortControllerRef.current?.abort();
+    if (stoppingGeneration || !abortControllerRef.current) return;
+    setStoppingGeneration(true);
+    abortControllerRef.current.abort();
   };
 
   const runAutoStudyPipeline = async (initialSession: LectureSession) => {
@@ -525,10 +545,12 @@ export default function App() {
     abortControllerRef.current = controller;
 
     let latestSession = initialSession;
+    let partialChaptersNote = '';
     const sessionChunks = chunkTranscriptSegments(
       latestSession.content.segments,
     );
 
+    setStoppingGeneration(false);
     setErrorState(null);
     setStatusBanner(null);
 
@@ -564,8 +586,18 @@ export default function App() {
                   totalChapters,
                   chapterLabel,
                 }),
+              onPartialNotes: (partialData, completedChapters, totalChapters) => {
+                partialChaptersNote = ` (${completedChapters}/${totalChapters} chapters)`;
+                latestSession = {
+                  ...latestSession,
+                  notes: partialData,
+                  updatedAt: Date.now(),
+                };
+                persistSession(latestSession);
+              },
             },
           );
+          partialChaptersNote = '';
           if (telemetry.source === 'ON_DEVICE') {
             setOnDeviceStatus('available');
           }
@@ -593,8 +625,23 @@ export default function App() {
                   totalChapters,
                   chapterLabel,
                 }),
+              onPartialFlashcards: (
+                partialData,
+                completedChapters,
+                totalChapters,
+              ) => {
+                partialChaptersNote = ` (${completedChapters}/${totalChapters} chapters)`;
+                latestSession = {
+                  ...latestSession,
+                  flashcards: partialData,
+                  masteredCardIds: [],
+                  updatedAt: Date.now(),
+                };
+                persistSession(latestSession);
+              },
             },
           );
+          partialChaptersNote = '';
           if (telemetry.source === 'ON_DEVICE') {
             setOnDeviceStatus('available');
           }
@@ -637,8 +684,24 @@ export default function App() {
       );
     } catch (error) {
       if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        const savedParts: string[] = [];
+        if (latestSession.notes) {
+          savedParts.push(
+            `${latestSession.notes.takeaways.length} takeaways, ${latestSession.notes.definitions.length} definitions`,
+          );
+        }
+        if (latestSession.flashcards?.cards.length) {
+          savedParts.push(`${latestSession.flashcards.cards.length} flashcards`);
+        }
+        if (latestSession.quiz?.questions.length) {
+          savedParts.push(
+            `${latestSession.quiz.questions.length} quiz questions`,
+          );
+        }
         setStatusBanner(
-          'Generation cancelled — any completed sections were saved.',
+          savedParts.length > 0
+            ? `Stopped — saved ${savedParts.join(', ')}${partialChaptersNote}.`
+            : 'Generation stopped before any section finished.',
         );
       } else {
         handleAiError(error);
@@ -647,6 +710,7 @@ export default function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
+      setStoppingGeneration(false);
       setLoadingTask(null);
       setPipelineProgress(null);
       setDownloadProgress(null);
@@ -884,6 +948,9 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    let latest = session;
+    let partialChaptersNote = '';
+    setStoppingGeneration(false);
     setErrorState(null);
     setDownloadProgress(null);
     setLoadingTask('notes');
@@ -905,20 +972,33 @@ export default function App() {
               totalChapters,
               chapterLabel,
             }),
+          onPartialNotes: (partialData, completedChapters, totalChapters) => {
+            partialChaptersNote = ` (${completedChapters}/${totalChapters} chapters)`;
+            latest = {
+              ...latest,
+              notes: partialData,
+              updatedAt: Date.now(),
+            };
+            persistSession(latest);
+          },
         },
       );
       if (telemetry.source === 'ON_DEVICE') {
         setOnDeviceStatus('available');
       }
       persistSession({
-        ...session,
+        ...latest,
         notes: data,
-        ...recordTelemetry(session, telemetry),
+        ...recordTelemetry(latest, telemetry),
         updatedAt: Date.now(),
       });
     } catch (error) {
       if (error instanceof HybridAiError && error.code === 'ABORTED') {
-        setStatusBanner('Notes generation cancelled.');
+        setStatusBanner(
+          partialChaptersNote && latest.notes
+            ? `Stopped — saved ${latest.notes.takeaways.length} takeaways, ${latest.notes.definitions.length} definitions${partialChaptersNote}.`
+            : 'Notes generation cancelled.',
+        );
       } else {
         handleAiError(error);
       }
@@ -926,6 +1006,7 @@ export default function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
+      setStoppingGeneration(false);
       setLoadingTask(null);
       setPipelineProgress(null);
       setDownloadProgress(null);
@@ -938,6 +1019,7 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    setStoppingGeneration(false);
     setErrorState(null);
     setDownloadProgress(null);
     setLoadingTask('notes');
@@ -979,6 +1061,7 @@ export default function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
+      setStoppingGeneration(false);
       setLoadingTask(null);
       setPipelineProgress(null);
       setDownloadProgress(null);
@@ -991,6 +1074,9 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    let latest = session;
+    let partialChaptersNote = '';
+    setStoppingGeneration(false);
     setErrorState(null);
     setDownloadProgress(null);
     setLoadingTask('flashcards');
@@ -1012,21 +1098,39 @@ export default function App() {
               totalChapters,
               chapterLabel,
             }),
+          onPartialFlashcards: (
+            partialData,
+            completedChapters,
+            totalChapters,
+          ) => {
+            partialChaptersNote = ` (${completedChapters}/${totalChapters} chapters)`;
+            latest = {
+              ...latest,
+              flashcards: partialData,
+              masteredCardIds: [],
+              updatedAt: Date.now(),
+            };
+            persistSession(latest);
+          },
         },
       );
       if (telemetry.source === 'ON_DEVICE') {
         setOnDeviceStatus('available');
       }
       persistSession({
-        ...session,
+        ...latest,
         flashcards: data,
         masteredCardIds: [],
-        ...recordTelemetry(session, telemetry),
+        ...recordTelemetry(latest, telemetry),
         updatedAt: Date.now(),
       });
     } catch (error) {
       if (error instanceof HybridAiError && error.code === 'ABORTED') {
-        setStatusBanner('Flashcards generation cancelled.');
+        setStatusBanner(
+          partialChaptersNote && latest.flashcards?.cards.length
+            ? `Stopped — saved ${latest.flashcards.cards.length} flashcards${partialChaptersNote}.`
+            : 'Flashcards generation cancelled.',
+        );
       } else {
         handleAiError(error);
       }
@@ -1034,6 +1138,7 @@ export default function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
+      setStoppingGeneration(false);
       setLoadingTask(null);
       setPipelineProgress(null);
       setDownloadProgress(null);
@@ -1046,6 +1151,7 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    setStoppingGeneration(false);
     setErrorState(null);
     setDownloadProgress(null);
     setLoadingTask('flashcards');
@@ -1087,6 +1193,7 @@ export default function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
+      setStoppingGeneration(false);
       setLoadingTask(null);
       setPipelineProgress(null);
       setDownloadProgress(null);
@@ -1099,6 +1206,7 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    setStoppingGeneration(false);
     setErrorState(null);
     setLoadingTask('quiz');
     setPipelineProgress(null);
@@ -1123,6 +1231,7 @@ export default function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
+      setStoppingGeneration(false);
       setLoadingTask(null);
     }
   };
@@ -1342,6 +1451,8 @@ export default function App() {
           downloadingNano={downloadingNano}
           downloadProgress={downloadProgress}
           elapsedMs={elapsedMs}
+          chapterElapsedMs={chapterElapsedMs}
+          isStopping={stoppingGeneration}
           onDeviceStatus={onDeviceStatus}
           policy={policy}
           statusBanner={statusBanner}
