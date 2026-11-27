@@ -23,7 +23,6 @@ export interface HeaderBarProps {
   theme: 'light' | 'dark';
   onDeviceStatus: OnDeviceAvailability;
   isOnline: boolean;
-  downloadProgress: number | null;
   session: LectureSession | null;
   savedSessionCount: number;
   libraryOpen: boolean;
@@ -43,7 +42,6 @@ export function HeaderBar({
   theme,
   onDeviceStatus,
   isOnline,
-  downloadProgress,
   session,
   savedSessionCount,
   libraryOpen,
@@ -135,7 +133,6 @@ export function HeaderBar({
             history={session?.telemetryHistory ?? []}
             onDeviceStatus={onDeviceStatus}
             policy={policy}
-            downloadProgress={downloadProgress}
             isOnline={isOnline}
           />
           <div className="flex items-center gap-1.5">

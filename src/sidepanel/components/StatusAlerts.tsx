@@ -40,6 +40,7 @@ export interface StatusAlertsProps {
   onRecheckOrDownloadNano: () => void;
   onOpenChromePage: (url: string) => void;
   onCancelGeneration?: () => void;
+  onCancelDownload?: () => void;
 }
 
 /**
@@ -61,6 +62,7 @@ export function StatusAlerts({
   onRecheckOrDownloadNano,
   onOpenChromePage,
   onCancelGeneration,
+  onCancelDownload,
 }: StatusAlertsProps) {
   return (
     <>
@@ -100,17 +102,27 @@ export function StatusAlerts({
                 <span className="truncate">{taskTitle}</span>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="font-mono text-[11px]">{currentPct}%</span>
-                  {!isNanoDl && onCancelGeneration && (
-                    <button
-                      type="button"
-                      onClick={onCancelGeneration}
-                      className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-500/30 hover:bg-rose-500/25 dark:text-rose-300"
-                      title="Stop current generation"
-                    >
-                      <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
-                      Stop
-                    </button>
-                  )}
+                  {(() => {
+                    const cancelHandler = isNanoDl
+                      ? onCancelDownload
+                      : onCancelGeneration;
+                    if (!cancelHandler) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={cancelHandler}
+                        className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-500/30 hover:bg-rose-500/25 dark:text-rose-300"
+                        title={
+                          isNanoDl
+                            ? 'Stop tracking download (Chrome may continue downloading in the background)'
+                            : 'Stop current generation'
+                        }
+                      >
+                        <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                        Stop
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
               <div

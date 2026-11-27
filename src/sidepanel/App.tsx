@@ -133,6 +133,7 @@ export default function App() {
   const [dismissedSetupBanner, setDismissedSetupBanner] = useState(false);
   const nanoPrewarmAttemptedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const downloadAbortRef = useRef<AbortController | null>(null);
   const onDeviceStatusRef = useRef<OnDeviceAvailability>(onDeviceStatus);
   onDeviceStatusRef.current = onDeviceStatus;
   const tabRefs = useRef<Record<ActiveTab, HTMLButtonElement | null>>({
@@ -228,6 +229,10 @@ export default function App() {
   }, [loadingTask, downloadingNano]);
 
   const handleDownloadNano = async () => {
+    downloadAbortRef.current?.abort();
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+
     setErrorState(null);
     setDownloadingNano(true);
     setDownloadProgress(0);
@@ -235,20 +240,40 @@ export default function App() {
     try {
       const nextStatus = await triggerOnDeviceDownload((pct) => {
         setDownloadProgress(pct);
-      });
+      }, controller.signal);
       setOnDeviceStatus(nextStatus);
       if (nextStatus === 'available') {
         setStatusBanner('Gemini Nano is downloaded and ready for Local-Only AI!');
       }
     } catch (error) {
-      setErrorState({
-        message: 'Could not start Gemini Nano download monitor.',
-        hint: error instanceof Error ? error.message : String(error),
-      });
+      if (error instanceof HybridAiError && error.code === 'ABORTED') {
+        setStatusBanner(
+          'Stopped tracking Gemini Nano download. Chrome may finish it in the background while Hybrid mode uses Cloud fallback.',
+        );
+      } else {
+        setErrorState({
+          message: 'Could not start Gemini Nano download monitor.',
+          hint: error instanceof Error ? error.message : String(error),
+        });
+      }
     } finally {
+      if (downloadAbortRef.current === controller) {
+        downloadAbortRef.current = null;
+      }
       setDownloadingNano(false);
       setDownloadProgress(null);
     }
+  };
+
+  const handleCancelDownload = () => {
+    downloadAbortRef.current?.abort();
+    downloadAbortRef.current = null;
+    setDownloadingNano(false);
+    setDownloadProgress(null);
+    void checkOnDeviceAvailability().then(setOnDeviceStatus);
+    setStatusBanner(
+      'Stopped tracking Gemini Nano download. Chrome may finish it in the background while Hybrid mode uses Cloud fallback.',
+    );
   };
 
   const handleOpenChromePage = async (url: string) => {
@@ -302,13 +327,17 @@ export default function App() {
       return;
     }
     nanoPrewarmAttemptedRef.current = true;
+    downloadAbortRef.current?.abort();
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+
     setDownloadingNano(true);
     setDownloadProgress(0);
     setOnDeviceStatus('downloading');
 
     void triggerOnDeviceDownload((pct) => {
       setDownloadProgress(pct);
-    })
+    }, controller.signal)
       .then((nextStatus) => {
         setOnDeviceStatus(nextStatus);
         if (nextStatus === 'available') {
@@ -316,9 +345,12 @@ export default function App() {
         }
       })
       .catch(() => {
-        // Silent background pre-warm failure should never interrupt Hybrid mode
+        // Silent background pre-warm / cancel should never interrupt Hybrid mode
       })
       .finally(() => {
+        if (downloadAbortRef.current === controller) {
+          downloadAbortRef.current = null;
+        }
         setDownloadingNano(false);
         setDownloadProgress(null);
       });
@@ -365,6 +397,8 @@ export default function App() {
     if (session?.sourceId === sourceId) {
       setSession(remaining[0] ?? null);
       setSelectedChunkId(ALL_CHAPTERS_ID);
+      setStatusBanner(null);
+      setErrorState(null);
     }
   };
 
@@ -1237,7 +1271,6 @@ export default function App() {
         theme={theme}
         onDeviceStatus={onDeviceStatus}
         isOnline={isOnline}
-        downloadProgress={downloadProgress}
         session={session}
         savedSessionCount={savedSessions.length}
         libraryOpen={libraryOpen}
@@ -1318,6 +1351,7 @@ export default function App() {
           onRecheckOrDownloadNano={() => void handleRecheckOrDownloadNano()}
           onOpenChromePage={(url) => void handleOpenChromePage(url)}
           onCancelGeneration={handleCancelGeneration}
+          onCancelDownload={handleCancelDownload}
         />
 
         {session ? (

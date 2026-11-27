@@ -117,6 +117,7 @@ interface ChromeLanguageModelGlobal {
     availability?: (options?: OnDeviceLanguageOptions) => Promise<string>;
     create?: (
       options?: OnDeviceLanguageOptions & {
+        signal?: AbortSignal;
         monitor?: (m: {
           addEventListener: (
             eventType: 'downloadprogress',
@@ -614,7 +615,11 @@ export async function checkOnDeviceAvailability(): Promise<OnDeviceAvailability>
 export function formatLatency(latencyMs: number): string {
   if (!Number.isFinite(latencyMs) || latencyMs < 0) return '0ms';
   if (latencyMs < 1000) return `${Math.round(latencyMs)}ms`;
-  return `${(latencyMs / 1000).toFixed(1)}s`;
+  if (latencyMs < 60_000) return `${(latencyMs / 1000).toFixed(1)}s`;
+  const totalSeconds = Math.floor(latencyMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
 }
 
 /**
@@ -644,26 +649,42 @@ export function computeExecutionProgress(
  */
 export async function triggerOnDeviceDownload(
   onProgress: (percent: number) => void,
+  signal?: AbortSignal,
 ): Promise<OnDeviceAvailability> {
+  if (signal?.aborted) {
+    throw new HybridAiError('ABORTED', 'Download tracking was cancelled.');
+  }
+
   const api = (globalThis as unknown as ChromeLanguageModelGlobal).LanguageModel;
   if (!api?.create) {
     return checkOnDeviceAvailability();
   }
 
-  const session = await api.create({
-    ...DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS,
-    monitor: (m) => {
-      m.addEventListener('downloadprogress', (e) => {
-        const pct = Math.min(
-          100,
-          Math.max(0, Math.round((e.loaded ?? 0) * 100)),
-        );
-        onProgress(pct);
-      });
-    },
-  });
-  session?.destroy?.();
-  return checkOnDeviceAvailability();
+  try {
+    const session = await api.create({
+      ...DEFAULT_ON_DEVICE_LANGUAGE_OPTIONS,
+      ...(signal ? { signal } : {}),
+      monitor: (m) => {
+        m.addEventListener('downloadprogress', (e) => {
+          const pct = Math.min(
+            100,
+            Math.max(0, Math.round((e.loaded ?? 0) * 100)),
+          );
+          onProgress(pct);
+        });
+      },
+    });
+    session?.destroy?.();
+    return checkOnDeviceAvailability();
+  } catch (error) {
+    if (
+      signal?.aborted ||
+      (error instanceof DOMException && error.name === 'AbortError')
+    ) {
+      throw new HybridAiError('ABORTED', 'Download tracking was cancelled.');
+    }
+    throw error;
+  }
 }
 
 export function normalizeInferenceSource(

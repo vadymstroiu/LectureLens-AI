@@ -322,66 +322,286 @@
             </div>
           </div>
 
+          <h3 class="gallery-subheading">
+            <span>Hybrid Onboarding &amp; Fallback Lifecycle (Click any image to enlarge)</span>
+          </h3>
           <div class="grid-2">
             <article class="shot-card">
               <div class="shot-media">
-                <img
-                  src="./screenshots/1-nano-download.png"
-                  alt="LectureLens AI showing Gemini Nano download progress with automatic Cloud fallback"
-                  onerror="this.closest('.shot-card').classList.add('is-missing')"
-                />
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="1. Nano Flag Off → Automatic Cloud Fallback"
+                  data-shot-desc="When Chrome Gemini Nano is disabled or unavailable, LectureLens AI stays ready in Hybrid mode using Cloud Gemini 3.8 Flash fallback."
+                  aria-label="Enlarge screenshot: 1. Nano Flag Off to Automatic Cloud Fallback"
+                >
+                  <img
+                    src="./screenshots/turned-off.png"
+                    alt="LectureLens AI showing Nano Unavailable with automatic Cloud Fallback"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
                 <div class="shot-fallback">
-                  <code>docs/screenshots/1-nano-download.png</code>
-                  <span>Add screenshot of Nano download / Cloud fallback</span>
+                  <code>docs/screenshots/turned-off.png</code>
+                  <span>Add screenshot of Nano disabled / Cloud fallback</span>
                 </div>
               </div>
               <div class="shot-body">
-                <h3>1. Graceful Cloud Fallback &amp; Nano Download</h3>
+                <h4>1. Nano Unavailable → Cloud Fallback</h4>
                 <p>
-                  First-run users stay unblocked via automatic Gemini 3.8 Flash
-                  fallback while Gemini Nano downloads once in Chrome.
+                  Shows seamless Cloud Gemini 3.8 Flash readiness even before
+                  Gemini Nano is enabled on the device.
                 </p>
               </div>
             </article>
 
             <article class="shot-card">
               <div class="shot-media">
-                <img
-                  src="./screenshots/2-notes-personal.png"
-                  alt="LectureLens AI Notes tab with timestamped takeaways and Personal Notes"
-                  onerror="this.closest('.shot-card').classList.add('is-missing')"
-                />
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="2. Nano Enabled → Background Download Detected"
+                  data-shot-desc="Once Chrome Prompt API flags are enabled, LectureLens AI detects Chrome's background download and offers a 1-click download tracker."
+                  aria-label="Enlarge screenshot: 2. Nano Enabled to Background Download Detected"
+                >
+                  <img
+                    src="./screenshots/turned-on.png"
+                    alt="LectureLens AI detecting Chrome background Gemini Nano download"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
                 <div class="shot-fallback">
-                  <code>docs/screenshots/2-notes-personal.png</code>
-                  <span>Add screenshot of Notes tab &amp; Personal Notes</span>
+                  <code>docs/screenshots/turned-on.png</code>
+                  <span>Add screenshot of Nano downloading notice</span>
                 </div>
               </div>
               <div class="shot-body">
-                <h3>2. Timestamped Notes &amp; Personal Notes</h3>
+                <h4>2. Background Download &amp; Tracker Banner</h4>
                 <p>
-                  Key takeaways sorted chronologically alongside user-authored
-                  notes stamped with live <em>Use Video Time</em>.
+                  Detects when Chrome begins downloading Gemini Nano while
+                  keeping Hybrid fallback available immediately.
                 </p>
               </div>
             </article>
 
             <article class="shot-card">
               <div class="shot-media">
-                <img
-                  src="./screenshots/3-flashcards.png"
-                  alt="LectureLens AI 3D interactive Active-Recall Flashcards tab"
-                  onerror="this.closest('.shot-card').classList.add('is-missing')"
-                />
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="3. Live One-Time Gemini Nano Download"
+                  data-shot-desc="Real-time download progress bar and elapsed timer inside Chrome's Side Panel while fetching the on-device weights."
+                  aria-label="Enlarge screenshot: 3. Live One-Time Gemini Nano Download"
+                >
+                  <img
+                    src="./screenshots/download.png"
+                    alt="LectureLens AI showing live Gemini Nano download percentage and elapsed timer"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
                 <div class="shot-fallback">
-                  <code>docs/screenshots/3-flashcards.png</code>
+                  <code>docs/screenshots/download.png</code>
+                  <span>Add screenshot of live download progress</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>3. Live One-Time Model Download Progress</h4>
+                <p>
+                  Displays live percentage and elapsed time while Chrome caches
+                  Gemini Nano on-device for zero-quota studying.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="4. Gemini Nano Ready for Local-Only AI"
+                  data-shot-desc="Once downloaded, LectureLens AI shows the green Gemini Nano Ready badge for private, offline-capable study generation."
+                  aria-label="Enlarge screenshot: 4. Gemini Nano Ready for Local-Only AI"
+                >
+                  <img
+                    src="./screenshots/ready.png"
+                    alt="LectureLens AI showing Gemini Nano Ready status badge"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/ready.png</code>
+                  <span>Add screenshot of Gemini Nano Ready state</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>4. Gemini Nano Ready (Private &amp; Local)</h4>
+                <p>
+                  Green <strong>Gemini Nano Ready</strong> badge confirms
+                  instant on-device Notes, Flashcards, and Local-Only mode.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <h3 class="gallery-subheading">
+            <span>Capture, Live Pipeline &amp; Hybrid Telemetry</span>
+          </h3>
+          <div class="grid-3">
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Live 3-Step Auto Study-Kit Pipeline"
+                  data-shot-desc="Captures the YouTube transcript and automatically runs Notes → Flashcards → Quiz with a single Stop control and live elapsed timer."
+                  aria-label="Enlarge screenshot: Live 3-Step Auto Study-Kit Pipeline"
+                >
+                  <img
+                    src="./screenshots/extract-notes.png"
+                    alt="LectureLens AI extracting study notes on-device during Step 1 of 3 with Stop control"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/extract-notes.png</code>
+                  <span>Add screenshot of live pipeline extraction</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Live 3-Step Study Pipeline</h4>
+                <p>
+                  Shows <strong>PREFER_ON_DEVICE</strong> progress with a single
+                  Stop button and Personal Notes composer ready underneath.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Web Article Selection &amp; Paste Drawer"
+                  data-shot-desc="Expandable drawer lets learners grab highlighted text from articles like Wikipedia (via optional_host_permissions) or paste custom notes."
+                  aria-label="Enlarge screenshot: Web Article Selection and Paste Drawer"
+                >
+                  <img
+                    src="./screenshots/text-extractor-from-page-or-copy-paste.png"
+                    alt="LectureLens AI Paste and Selected Text drawer with Grab Page Selection button"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/text-extractor-from-page-or-copy-paste.png</code>
+                  <span>Add screenshot of web selection &amp; paste drawer</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Web Selection &amp; Custom Text</h4>
+                <p>
+                  Grab highlighted excerpts from any article or paste study text
+                  with zero irrelevant video timestamps.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Live Hybrid Telemetry (67% Local)"
+                  data-shot-desc="Tracks real Firebase AI Logic inferenceSource and latency per call: local Gemini Nano for Notes &amp; Flashcards, Cloud Gemini 3.8 Flash for Quiz."
+                  aria-label="Enlarge screenshot: Live Hybrid Telemetry"
+                >
+                  <img
+                    src="./screenshots/telemetry.png"
+                    alt="LectureLens AI Hybrid Telemetry popover showing 67 percent local execution across Gemini Nano and Cloud Gemini"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/telemetry.png</code>
+                  <span>Add screenshot of Hybrid Telemetry popover</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Live Hybrid Telemetry (67% Local)</h4>
+                <p>
+                  Transparent per-call breakdown of on-device Gemini Nano vs.
+                  Cloud Gemini latencies from Firebase AI Logic.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <h3 class="gallery-subheading">
+            <span>Core Study Workspace &amp; Local History</span>
+          </h3>
+          <div class="grid-2">
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Timestamped Notes, Glossary &amp; Personal Notes"
+                  data-shot-desc="Section summary, clickable timestamp takeaways, definitions with Explain Simply (Nano), Personal Notes with Use Video Time, and Markdown export."
+                  aria-label="Enlarge screenshot: Timestamped Notes, Glossary and Personal Notes"
+                >
+                  <img
+                    src="./screenshots/extracted-notes.png"
+                    alt="LectureLens AI Notes tab with Section Summary, Key Takeaways, Key Definitions, Personal Notes, and Export bar"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/extracted-notes.png</code>
+                  <span>Add screenshot of extracted Notes tab</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Timestamped Notes &amp; Personal Notes</h4>
+                <p>
+                  Summary, clickable takeaways, definitions with
+                  <em>Explain Simply (Nano)</em>, and user-authored notes.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Keyboard-Accessible 3D Flashcards"
+                  data-shot-desc="Interactive active-recall deck generated on-device with mastery tracking and Space / arrow / M keyboard shortcuts."
+                  aria-label="Enlarge screenshot: Keyboard-Accessible 3D Flashcards"
+                >
+                  <img
+                    src="./screenshots/flesh-cards.png"
+                    alt="LectureLens AI 3D interactive Active-Recall Flashcards tab"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/flesh-cards.png</code>
                   <span>Add screenshot of Active-Recall Flashcards</span>
                 </div>
               </div>
               <div class="shot-body">
-                <h3>3. Keyboard-Accessible Active-Recall Deck</h3>
+                <h4>3D Active-Recall Flashcards</h4>
                 <p>
-                  3D flip cards generated on-device per chapter with mastery
-                  tracking and keyboard shortcuts (<code>Space</code>, arrows,
+                  Interactive flip cards generated on-device with mastery
+                  progress and keyboard shortcuts (<code>Space</code>, arrows,
                   <code>M</code>).
                 </p>
               </div>
@@ -389,21 +609,60 @@
 
             <article class="shot-card">
               <div class="shot-media">
-                <img
-                  src="./screenshots/4-quiz-telemetry.png"
-                  alt="LectureLens AI Cloud Quiz with Explain Simply Nano analogy and Hybrid Telemetry"
-                  onerror="this.closest('.shot-card').classList.add('is-missing')"
-                />
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Full-Lecture Cloud Quiz + Explain Simply (Nano)"
+                  data-shot-desc="Cloud Gemini 3.8 Flash practice quiz with clickable timestamp links, clear correctness feedback, explanations, and on-device Nano analogies."
+                  aria-label="Enlarge screenshot: Full-Lecture Cloud Quiz plus Explain Simply Nano"
+                >
+                  <img
+                    src="./screenshots/quiz.png"
+                    alt="LectureLens AI Quiz tab with answered questions, explanations, and Explain Simply Nano buttons"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
                 <div class="shot-fallback">
-                  <code>docs/screenshots/4-quiz-telemetry.png</code>
-                  <span>Add screenshot of Quiz, Nano Analogy &amp; Telemetry</span>
+                  <code>docs/screenshots/quiz.png</code>
+                  <span>Add screenshot of Practice Quiz tab</span>
                 </div>
               </div>
               <div class="shot-body">
-                <h3>4. Cloud Quiz + Local Nano Tutor &amp; Telemetry</h3>
+                <h4>Cloud Quiz &amp; Explain Simply (Nano)</h4>
                 <p>
-                  12-question full-lecture Cloud quiz paired with instant
-                  on-device Nano analogies and live Local/Cloud telemetry.
+                  Scored multiple-choice assessment powered by Cloud Gemini with
+                  one-click on-device Nano analogies per question.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Private Per-Profile Local Study History"
+                  data-shot-desc="All parsed lectures, flashcards, quizzes, and personal notes stay stored locally in chrome.storage.local with source links and quota meter."
+                  aria-label="Enlarge screenshot: Private Per-Profile Local Study History"
+                >
+                  <img
+                    src="./screenshots/history.png"
+                    alt="LectureLens AI Study History drawer saved locally in Chrome profile"
+                    onerror="const card=this.closest('.shot-card');card.classList.add('is-missing');this.closest('.shot-trigger').disabled=true;"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/history.png</code>
+                  <span>Add screenshot of Study History drawer</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Private Local Study History</h4>
+                <p>
+                  Offline-capable Chrome profile storage showing clickable source
+                  URLs, study stats, and exact profile quota usage.
                 </p>
               </div>
             </article>
@@ -537,6 +796,46 @@ npm install &amp;&amp; npm run build</pre>
       </div>
     </footer>
 
+    <div
+      id="shot-lightbox"
+      class="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lightbox-title"
+      hidden
+    >
+      <div class="lightbox-dialog">
+        <div class="lightbox-top">
+          <div>
+            <h3 id="lightbox-title">Screenshot</h3>
+            <p id="lightbox-desc"></p>
+          </div>
+          <button
+            id="lightbox-close"
+            type="button"
+            class="btn btn-sm"
+            aria-label="Close screenshot preview"
+          >
+            Close
+          </button>
+        </div>
+        <div class="lightbox-stage">
+          <img id="lightbox-img" src="" alt="" />
+        </div>
+        <div class="lightbox-bar">
+          <span id="lightbox-counter">1 / 1</span>
+          <div class="lightbox-nav">
+            <button id="lightbox-prev" type="button" class="btn btn-sm">
+              ← Previous
+            </button>
+            <button id="lightbox-next" type="button" class="btn btn-sm">
+              Next →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
       (function () {
         const root = document.documentElement;
@@ -572,6 +871,92 @@ npm install &amp;&amp; npm run build</pre>
               // Ignore clipboard permission errors on file://
             }
           });
+        });
+
+        const lightbox = document.getElementById('shot-lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        const lightboxTitle = document.getElementById('lightbox-title');
+        const lightboxDesc = document.getElementById('lightbox-desc');
+        const lightboxCounter = document.getElementById('lightbox-counter');
+        const prevBtn = document.getElementById('lightbox-prev');
+        const nextBtn = document.getElementById('lightbox-next');
+        const closeBtn = document.getElementById('lightbox-close');
+        let activeTriggers = [];
+        let activeIndex = 0;
+        let lastFocused = null;
+
+        const getLoadedTriggers = () =>
+          Array.from(document.querySelectorAll('.shot-trigger')).filter(
+            (btn) => !btn.closest('.shot-card')?.classList.contains('is-missing'),
+          );
+
+        const renderLightbox = () => {
+          const trigger = activeTriggers[activeIndex];
+          const img = trigger?.querySelector('img');
+          if (!trigger || !img || !lightboxImg) return;
+          lightboxImg.src = img.getAttribute('src') || '';
+          lightboxImg.alt = img.getAttribute('alt') || '';
+          if (lightboxTitle) {
+            lightboxTitle.textContent =
+              trigger.getAttribute('data-shot-title') || 'Screenshot';
+          }
+          if (lightboxDesc) {
+            lightboxDesc.textContent =
+              trigger.getAttribute('data-shot-desc') || '';
+          }
+          if (lightboxCounter) {
+            lightboxCounter.textContent = `${activeIndex + 1} / ${activeTriggers.length}`;
+          }
+        };
+
+        const openLightbox = (trigger) => {
+          activeTriggers = getLoadedTriggers();
+          activeIndex = activeTriggers.indexOf(trigger);
+          if (activeIndex < 0 || !lightbox) return;
+          lastFocused = document.activeElement;
+          renderLightbox();
+          lightbox.hidden = false;
+          closeBtn?.focus();
+        };
+
+        const closeLightbox = () => {
+          if (!lightbox || lightbox.hidden) return;
+          lightbox.hidden = true;
+          if (lastFocused instanceof HTMLElement) {
+            lastFocused.focus();
+          }
+        };
+
+        const stepLightbox = (delta) => {
+          if (!activeTriggers.length) return;
+          activeIndex =
+            (activeIndex + delta + activeTriggers.length) %
+            activeTriggers.length;
+          renderLightbox();
+        };
+
+        document.querySelectorAll('.shot-trigger').forEach((trigger) => {
+          trigger.addEventListener('click', () => openLightbox(trigger));
+        });
+
+        closeBtn?.addEventListener('click', closeLightbox);
+        prevBtn?.addEventListener('click', () => stepLightbox(-1));
+        nextBtn?.addEventListener('click', () => stepLightbox(1));
+        lightbox?.addEventListener('click', (e) => {
+          if (e.target === lightbox) closeLightbox();
+        });
+        window.addEventListener('keydown', (e) => {
+          if (!lightbox || lightbox.hidden) return;
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeLightbox();
+          } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            stepLightbox(-1);
+          } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            stepLightbox(1);
+          }
         });
       })();
     </script>

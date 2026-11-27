@@ -188,6 +188,8 @@ describe('Hybrid AI routing & model configuration', () => {
     expect(result.telemetry.modelLabel).toBe(CLOUD_MODEL_NAME);
     expect(result.telemetry.latencyMs).toBe(1620);
     expect(formatLatency(result.telemetry.latencyMs)).toBe('1.6s');
+    expect(formatLatency(60000)).toBe('1m 0s');
+    expect(formatLatency(75300)).toBe('1m 15s');
     expect(result.data.cards[0].id).toBe('c1');
   });
 
@@ -326,6 +328,15 @@ describe('Hybrid AI routing & model configuration', () => {
       expect(progressSpy).toHaveBeenCalledWith(63);
       expect(destroySpy).toHaveBeenCalledTimes(1);
       expect(status).toBe('available');
+
+      const abortController = new AbortController();
+      abortController.abort();
+      await expect(
+        triggerOnDeviceDownload(progressSpy, abortController.signal),
+      ).rejects.toMatchObject({
+        name: 'HybridAiError',
+        code: 'ABORTED',
+      });
     } finally {
       (globalThis as Record<string, unknown>).LanguageModel = originalLm;
     }
