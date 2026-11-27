@@ -217,19 +217,19 @@ describe('storage (local per-profile study history)', () => {
     installMockLocalStorage();
     expect(await loadPreferences()).toEqual({
       policy: 'hybrid',
-      theme: 'dark',
+      theme: 'light',
       autoGenerateOnCapture: true,
     });
 
     await savePreferences({
       policy: 'local-only',
-      theme: 'light',
+      theme: 'dark',
       autoGenerateOnCapture: false,
     });
 
     expect(await loadPreferences()).toEqual({
       policy: 'local-only',
-      theme: 'light',
+      theme: 'dark',
       autoGenerateOnCapture: false,
     });
   });

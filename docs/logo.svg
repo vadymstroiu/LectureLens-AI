@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
+  <defs>
+    <linearGradient id="lecturelens-bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="url(#lecturelens-bg)" />
+  <rect x="1.5" y="1.5" width="125" height="125" rx="26.5" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="3" />
+  <circle cx="64" cy="64" r="27" fill="#FFFFFF" fill-opacity="0.14" />
+  <circle cx="64" cy="64" r="39" stroke="#FFFFFF" stroke-opacity="0.92" stroke-width="7" />
+  <path
+    d="M 64 41 C 64 56 72 64 87 64 C 72 64 64 72 64 87 C 64 72 56 64 41 64 C 56 64 64 56 64 41 Z"
+    fill="#FFFFFF"
+  />
+  <path
+    d="M 92 27 C 92 31.5 94.5 34 99 34 C 94.5 34 92 36.5 92 41 C 92 36.5 89.5 34 85 34 C 89.5 34 92 31.5 92 27 Z"
+    fill="#FDE68A"
+  />
+</svg>

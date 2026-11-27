@@ -26,7 +26,7 @@ export interface StorageUsageSummary {
 
 const DEFAULT_PREFS: UserPreferences = {
   policy: 'hybrid',
-  theme: 'dark',
+  theme: 'light',
   autoGenerateOnCapture: true,
 };
 
@@ -222,7 +222,7 @@ export async function loadPreferences(): Promise<UserPreferences> {
   const stored = result[PREFS_KEY] as Partial<UserPreferences> | undefined;
   return {
     policy: stored?.policy === 'local-only' ? 'local-only' : 'hybrid',
-    theme: stored?.theme === 'light' ? 'light' : 'dark',
+    theme: stored?.theme === 'dark' ? 'dark' : 'light',
     autoGenerateOnCapture: stored?.autoGenerateOnCapture ?? true,
   };
 }

@@ -12,7 +12,6 @@ interface InferenceBadgeProps {
   history: InferenceTelemetry[];
   onDeviceStatus: OnDeviceAvailability;
   policy: HybridRoutingPolicy;
-  downloadProgress?: number | null;
   isOnline?: boolean;
 }
 
@@ -21,7 +20,6 @@ export function InferenceBadge({
   history,
   onDeviceStatus,
   policy,
-  downloadProgress,
   isOnline = true,
 }: InferenceBadgeProps) {
   const [showLog, setShowLog] = useState(false);
@@ -78,14 +76,10 @@ export function InferenceBadge({
     }
 
     const ready = onDeviceStatus === 'available';
-    const progressSuffix =
-      typeof downloadProgress === 'number' && downloadProgress >= 0
-        ? ` (${downloadProgress}%)`
-        : '';
     const label = ready
       ? 'Gemini Nano Ready'
       : onDeviceStatus === 'downloading'
-        ? `Nano Downloading${progressSuffix}`
+        ? 'Nano Downloading'
         : policy === 'local-only'
           ? 'Nano Required (Local-Only)'
           : 'Nano Unavailable • Cloud Fallback';

@@ -2,11 +2,15 @@ import {
   AlertTriangle,
   Download,
   ExternalLink,
+  Loader2,
   RefreshCw,
   Square,
   Zap,
 } from 'lucide-react';
-import { computeExecutionProgress, formatLatency } from '../../lib/hybridAi';
+import {
+  computePipelineExecutionProgress,
+  formatLatency,
+} from '../../lib/hybridAi';
 import type {
   HybridRoutingPolicy,
   OnDeviceAvailability,
@@ -31,6 +35,8 @@ export interface StatusAlertsProps {
   downloadingNano: boolean;
   downloadProgress: number | null;
   elapsedMs: number;
+  chapterElapsedMs?: number;
+  isStopping?: boolean;
   onDeviceStatus: OnDeviceAvailability;
   policy: HybridRoutingPolicy;
   statusBanner: string | null;
@@ -40,6 +46,7 @@ export interface StatusAlertsProps {
   onRecheckOrDownloadNano: () => void;
   onOpenChromePage: (url: string) => void;
   onCancelGeneration?: () => void;
+  onCancelDownload?: () => void;
 }
 
 /**
@@ -52,6 +59,8 @@ export function StatusAlerts({
   downloadingNano,
   downloadProgress,
   elapsedMs,
+  chapterElapsedMs,
+  isStopping = false,
   onDeviceStatus,
   policy,
   statusBanner,
@@ -61,6 +70,7 @@ export function StatusAlerts({
   onRecheckOrDownloadNano,
   onOpenChromePage,
   onCancelGeneration,
+  onCancelDownload,
 }: StatusAlertsProps) {
   return (
     <>
@@ -68,10 +78,20 @@ export function StatusAlerts({
       {(loadingTask !== null || downloadingNano) &&
         (() => {
           const isNanoDl = downloadProgress !== null && downloadProgress < 100;
-          const execProgress = computeExecutionProgress(
+          const isStoppingGeneration = !isNanoDl && isStopping;
+          const execProgress = computePipelineExecutionProgress({
             elapsedMs,
-            loadingTask === 'quiz' ? 6500 : 4000,
-          );
+            chapterElapsedMs,
+            chapterIndex: pipelineProgress?.chapterIndex,
+            totalChapters: pipelineProgress?.totalChapters,
+            expectedMs:
+              loadingTask === 'quiz'
+                ? 6500
+                : pipelineProgress?.totalChapters &&
+                    pipelineProgress.totalChapters > 1
+                  ? 15000
+                  : 4500,
+          });
           const currentPct = isNanoDl ? downloadProgress : execProgress.percent;
           const baseTaskTitle =
             loadingTask === 'notes'
@@ -100,17 +120,40 @@ export function StatusAlerts({
                 <span className="truncate">{taskTitle}</span>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="font-mono text-[11px]">{currentPct}%</span>
-                  {!isNanoDl && onCancelGeneration && (
-                    <button
-                      type="button"
-                      onClick={onCancelGeneration}
-                      className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-500/30 hover:bg-rose-500/25 dark:text-rose-300"
-                      title="Stop current generation"
-                    >
-                      <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
-                      Stop
-                    </button>
-                  )}
+                  {(() => {
+                    const cancelHandler = isNanoDl
+                      ? onCancelDownload
+                      : onCancelGeneration;
+                    if (!cancelHandler) return null;
+                    return (
+                      <button
+                        type="button"
+                        disabled={isStoppingGeneration}
+                        onClick={cancelHandler}
+                        className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-500/30 hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-75 dark:text-rose-300"
+                        title={
+                          isNanoDl
+                            ? 'Stop tracking download (Chrome may continue downloading in the background)'
+                            : isStoppingGeneration
+                              ? 'Stopping generation…'
+                              : 'Stop current generation'
+                        }
+                      >
+                        {isStoppingGeneration ? (
+                          <Loader2
+                            className="h-2.5 w-2.5 animate-spin"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Square
+                            className="h-2.5 w-2.5 fill-current"
+                            aria-hidden="true"
+                          />
+                        )}
+                        {isStoppingGeneration ? 'Stopping…' : 'Stop'}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
               <div
@@ -130,9 +173,11 @@ export function StatusAlerts({
                 <span>
                   {isNanoDl
                     ? 'One-time Chrome on-device model download'
-                    : policy === 'local-only' && loadingTask !== 'quiz'
-                      ? 'Running on-device (Local-Only)'
-                      : 'Running via Firebase AI Logic'}
+                    : isStoppingGeneration
+                      ? 'Stopping generation and saving completed progress…'
+                      : policy === 'local-only' && loadingTask !== 'quiz'
+                        ? 'Running on-device (Local-Only)'
+                        : 'Running via Firebase AI Logic'}
                 </span>
                 <span className="font-mono">{formatLatency(elapsedMs)} elapsed</span>
               </div>

@@ -4,6 +4,9 @@
 
 It runs **on-device with Gemini Nano** (Chrome Built-in Prompt API) for fast, private, zero-rate-limit study generation (`PREFER_ON_DEVICE` / `ONLY_ON_DEVICE`) and seamlessly routes or falls back to **Cloud Gemini 3.8 Flash** (`ONLY_IN_CLOUD` / `inCloudParams`) for full-lecture reasoning when needed.
 
+- **Demo Video (2:51):** [Watch on YouTube](https://youtu.be/MoI9YhzG8CI)
+- **Live Showcase & Install Guide:** https://vadymstroiu.github.io/LectureLens-AI/
+
 ---
 
 ## Problem Statement & Impact

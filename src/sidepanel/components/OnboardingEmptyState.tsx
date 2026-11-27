@@ -30,7 +30,7 @@ export function OnboardingEmptyState({ onOpenHelp }: OnboardingEmptyStateProps) 
         </h2>
         <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
           Stop scrubbing through 40-minute YouTube videos to review key
-          concepts—extract timestamped notes, flashcards, and quizzes privately
+          concepts-extract timestamped notes, flashcards, and quizzes privately
           with on-device Gemini Nano and seamless Cloud fallback.
         </p>
       </div>

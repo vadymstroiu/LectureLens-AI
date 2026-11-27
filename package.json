@@ -6,6 +6,7 @@
   "description": "LectureLens AI — Hybrid On-Device (Gemini Nano) + Cloud (Gemini 3.8 Flash) YouTube & article study companion powered by Firebase AI Logic.",
   "scripts": {
     "dev": "vite",
+    "preview:site": "vite --mode docs --port 4173",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

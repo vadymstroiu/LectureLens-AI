@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LectureLens AI — Hybrid On-Device &amp; Cloud Study Companion</title>
+    <meta
+      name="description"
+      content="Chrome MV3 Side Panel extension turning YouTube lectures and web articles into timestamped notes, flashcards, personal notes, and quizzes using Gemini Nano &amp; Cloud Gemini 3.8 Flash via Firebase AI Logic."
+    />
+    <meta
+      property="og:title"
+      content="LectureLens AI — #BuildHybridAI 2026"
+    />
+    <meta
+      property="og:description"
+      content="Hybrid On-Device Gemini Nano + Cloud Gemini 3.8 Flash study companion built with Firebase AI Logic and App Check."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="./logo.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="container nav-row">
+        <a class="brand" href="#top">
+          <img src="./logo.svg" alt="" width="34" height="34" />
+          <span>LectureLens AI</span>
+        </a>
+
+        <nav aria-label="Primary navigation">
+          <ul class="nav-links">
+            <li><a href="#architecture">Hybrid AI</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#demo">Demo &amp; Gallery</a></li>
+            <li><a href="#install">Install in Chrome</a></li>
+          </ul>
+        </nav>
+
+        <div class="nav-actions">
+          <button
+            id="theme-toggle"
+            type="button"
+            class="btn btn-sm icon-btn"
+            aria-label="Toggle light or dark theme"
+            title="Toggle light/dark theme"
+          >
+            🌙
+          </button>
+          <a
+            class="btn btn-sm"
+            href="https://github.com/vadymstroiu/LectureLens-AI"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <!-- Hero -->
+      <section id="top" class="hero">
+        <div class="container hero-grid">
+          <div>
+            <span class="badge">
+              #BuildHybridAI 2026 • Chrome MV3 Extension
+            </span>
+            <h1>
+              Turn long lectures into
+              <span class="gradient-text">local-first study kits</span>
+              in one click.
+            </h1>
+            <p class="hero-lead">
+              <strong>LectureLens AI</strong> lives in Chrome’s Side Panel,
+              combining <strong>on-device Gemini Nano</strong> and
+              <strong>Cloud Gemini 3.8 Flash</strong> via
+              <strong>Firebase AI Logic Hybrid Inference</strong> to turn YouTube
+              videos and highlighted web articles into timestamped notes,
+              active-recall flashcards, personal notes, and full-lecture quizzes.
+            </p>
+            <div class="hero-cta">
+              <a class="btn btn-primary" href="#demo">Watch Demo &amp; Tour</a>
+              <a class="btn" href="#install">Install in Chrome</a>
+              <a
+                class="btn"
+                href="https://github.com/vadymstroiu/LectureLens-AI"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Source Code (Apache 2.0)
+              </a>
+            </div>
+          </div>
+
+          <aside
+            class="telemetry-panel"
+            aria-label="Example Firebase AI Logic hybrid telemetry"
+          >
+            <div class="telemetry-header">
+              <span>Live Hybrid Telemetry</span>
+              <span class="badge badge-local">67% On-Device</span>
+            </div>
+            <div class="telemetry-stats">
+              <div class="stat-box">
+                <div class="stat-value stat-value-local">
+                  Local: 2
+                </div>
+                <div class="stat-label">Gemini Nano (avg 22.7s)</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-value stat-value-cloud">
+                  Cloud: 1
+                </div>
+                <div class="stat-label">Gemini 3.8 Flash (4.4s)</div>
+              </div>
+            </div>
+            <ul class="call-list">
+              <li class="call-item">
+                <span>⚡ Study Notes &amp; Glossary</span>
+                <span>Nano • PREFER_ON_DEVICE</span>
+              </li>
+              <li class="call-item">
+                <span>⚡ Active-Recall Flashcards</span>
+                <span>Nano • PREFER_ON_DEVICE</span>
+              </li>
+              <li class="call-item">
+                <span>☁️ Full-Lecture Quiz (12 Qs)</span>
+                <span>Cloud • ONLY_IN_CLOUD</span>
+              </li>
+              <li class="call-item">
+                <span>⚡ Explain Simply Tutor Loop</span>
+                <span>Nano • On-Device</span>
+              </li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Hybrid Architecture -->
+      <section id="architecture" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Firebase AI Logic Architecture</p>
+            <h2>Workload-matched Hybrid Inference across all 3 modes</h2>
+            <p>
+              Instead of firing 10+ cloud requests per hour-long lecture,
+              LectureLens AI matches each task to the right engine using
+              <code>firebase/ai</code> and <code>firebase/app-check</code>.
+            </p>
+          </div>
+
+          <div class="grid-3">
+            <article class="card">
+              <div>
+                <span class="badge badge-local">PREFER_ON_DEVICE</span>
+              </div>
+              <h3>Notes, Flashcards &amp; Analogies</h3>
+              <p>
+                Runs privately on <strong>Chrome Gemini Nano</strong> across up
+                to 12 lecture chapters with grammar-constrained JSON schemas (
+                <code>minItems</code> / <code>maxItems</code>).
+              </p>
+              <ul>
+                <li>Zero rate-limit quota burn</li>
+                <li>
+                  Automatic single-call Cloud fallback if Nano isn’t ready yet
+                </li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div>
+                <span class="badge badge-cloud">ONLY_IN_CLOUD</span>
+              </div>
+              <h3>Full-Lecture Practice Quiz</h3>
+              <p>
+                Sends up to 60,000 characters in one sequential call to
+                <strong>Gemini 3.8 Flash</strong> protected by MV3-safe
+                <strong>Firebase App Check</strong>.
+              </p>
+              <ul>
+                <li>Cross-chapter 5–12 question comprehension tests</li>
+                <li>Prevents duplicate questions &amp; cloud request bursts</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div>
+                <span class="badge badge-privacy">ONLY_ON_DEVICE</span>
+              </div>
+              <h3>Strict Local-Only Privacy Lock</h3>
+              <p>
+                Switch to <strong>Local-Only</strong> anytime to block all
+                outbound Cloud calls and keep sensitive study materials 100% on
+                your machine.
+              </p>
+              <ul>
+                <li>Works completely offline once Nano is downloaded</li>
+                <li>All Study History stays in your local Chrome profile</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="tutor-banner">
+            <div>
+              <strong>Bidirectional Cloud → On-Device Tutor Loop</strong>
+              <p>
+                Miss a question in the Cloud Quiz? Clicking
+                <em>Explain Simply (Nano)</em> routes just that concept back to
+                on-device Gemini Nano for an instant everyday analogy and key
+                takeaway.
+              </p>
+            </div>
+            <span class="badge badge-local">Cloud Quiz ↔ Local Tutor</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Key Features -->
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Built for Real Studying</p>
+            <h2>Complete workflow from capture to export</h2>
+          </div>
+
+          <div class="grid-3">
+            <article class="card">
+              <h3>One-Click Auto Study Kit</h3>
+              <p>
+                Click <strong>Capture YouTube Transcript</strong> to extract the
+                video transcript and automatically generate Notes → Flashcards →
+                Quiz, with live progress and a single Stop control.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Personal Notes &amp; Live Time</h3>
+              <p>
+                Write your own timestamped study notes with one-click
+                <strong>Use Video Time</strong> capture, edit/delete inline, and
+                keep everything stored privately per Chrome profile.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Cross-Tab Timestamp Jump</h3>
+              <p>
+                Click any <code>mm:ss</code> badge—even from History while
+                browsing another site—to seek in-place or open YouTube right at
+                that exact second (<code>&amp;t=Xs</code>).
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Web Articles &amp; Wikipedia</h3>
+              <p>
+                Highlight text on any webpage and click
+                <strong>Grab Page Selection</strong> (powered by privacy-first
+                MV3 <code>optional_host_permissions</code>) or paste notes
+                directly.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Chapter Filter &amp; Deep-Dive</h3>
+              <p>
+                Filter Notes, Flashcards, and Quizzes by chapter cleanly without
+                deleting other sections, or click
+                <strong>Deep-Dive Chapter (+More)</strong> for extra cards.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Complete Markdown &amp; A11y</h3>
+              <p>
+                Export everything (notes, personal notes, flashcards, analogies,
+                quiz &amp; clickable video links) as <code>.md</code>, built
+                with WCAG 2.1 AA keyboard navigation and Light/Dark themes.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Demo Video & Screenshots -->
+      <section id="demo" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Walkthrough</p>
+            <h2>Demo Video &amp; Product Screenshots</h2>
+            <p>
+              See Gemini Nano download/fallback, live hybrid generation,
+              personal notes, active-recall flashcards, and Cloud Quiz → Nano
+              tutor loops in action.
+            </p>
+          </div>
+
+          <div class="video-frame">
+            <div class="video-aspect">
+              <iframe
+                src="https://www.youtube.com/embed/MoI9YhzG8CI"
+                title="LectureLens AI #BuildHybridAI 2026 Demo Video"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allowfullscreen
+              ></iframe>
+            </div>
+          </div>
+
+          <h3 class="gallery-subheading">
+            <span>Hybrid Onboarding &amp; Fallback Lifecycle (Click any image to enlarge)</span>
+          </h3>
+          <div class="grid-2">
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="1. Nano Flag Off → Automatic Cloud Fallback"
+                  data-shot-desc="When Chrome Gemini Nano is disabled or unavailable, LectureLens AI stays ready in Hybrid mode using Cloud Gemini 3.8 Flash fallback."
+                  aria-label="Enlarge screenshot: 1. Nano Flag Off to Automatic Cloud Fallback"
+                >
+                  <img
+                    src="./screenshots/turned-off.png"
+                    alt="LectureLens AI showing Nano Unavailable with automatic Cloud Fallback"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/turned-off.png</code>
+                  <span>Add screenshot of Nano disabled / Cloud fallback</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>1. Nano Unavailable → Cloud Fallback</h4>
+                <p>
+                  Shows seamless Cloud Gemini 3.8 Flash readiness even before
+                  Gemini Nano is enabled on the device.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="2. Nano Enabled → Background Download Detected"
+                  data-shot-desc="Once Chrome Prompt API flags are enabled, LectureLens AI detects Chrome's background download and offers a 1-click download tracker."
+                  aria-label="Enlarge screenshot: 2. Nano Enabled to Background Download Detected"
+                >
+                  <img
+                    src="./screenshots/turned-on.png"
+                    alt="LectureLens AI detecting Chrome background Gemini Nano download"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/turned-on.png</code>
+                  <span>Add screenshot of Nano downloading notice</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>2. Background Download &amp; Tracker Banner</h4>
+                <p>
+                  Detects when Chrome begins downloading Gemini Nano while
+                  keeping Hybrid fallback available immediately.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="3. Live One-Time Gemini Nano Download"
+                  data-shot-desc="Real-time download progress bar and elapsed timer inside Chrome's Side Panel while fetching the on-device weights."
+                  aria-label="Enlarge screenshot: 3. Live One-Time Gemini Nano Download"
+                >
+                  <img
+                    src="./screenshots/download.png"
+                    alt="LectureLens AI showing live Gemini Nano download percentage and elapsed timer"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/download.png</code>
+                  <span>Add screenshot of live download progress</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>3. Live One-Time Model Download Progress</h4>
+                <p>
+                  Displays live percentage and elapsed time while Chrome caches
+                  Gemini Nano on-device for zero-quota studying.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="4. Gemini Nano Ready for Local-Only AI"
+                  data-shot-desc="Once downloaded, LectureLens AI shows the green Gemini Nano Ready badge for private, offline-capable study generation."
+                  aria-label="Enlarge screenshot: 4. Gemini Nano Ready for Local-Only AI"
+                >
+                  <img
+                    src="./screenshots/ready.png"
+                    alt="LectureLens AI showing Gemini Nano Ready status badge"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/ready.png</code>
+                  <span>Add screenshot of Gemini Nano Ready state</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>4. Gemini Nano Ready (Private &amp; Local)</h4>
+                <p>
+                  Green <strong>Gemini Nano Ready</strong> badge confirms
+                  instant on-device Notes, Flashcards, and Local-Only mode.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <h3 class="gallery-subheading">
+            <span>Capture, Live Pipeline &amp; Hybrid Telemetry</span>
+          </h3>
+          <div class="grid-3">
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Live 3-Step Auto Study-Kit Pipeline"
+                  data-shot-desc="Captures the YouTube transcript and automatically runs Notes → Flashcards → Quiz with a single Stop control and live elapsed timer."
+                  aria-label="Enlarge screenshot: Live 3-Step Auto Study-Kit Pipeline"
+                >
+                  <img
+                    src="./screenshots/extract-notes.png"
+                    alt="LectureLens AI extracting study notes on-device during Step 1 of 3 with Stop control"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/extract-notes.png</code>
+                  <span>Add screenshot of live pipeline extraction</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Live 3-Step Study Pipeline</h4>
+                <p>
+                  Shows <strong>PREFER_ON_DEVICE</strong> progress with a single
+                  Stop button and Personal Notes composer ready underneath.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Web Article Selection &amp; Paste Drawer"
+                  data-shot-desc="Expandable drawer lets learners grab highlighted text from articles like Wikipedia (via optional_host_permissions) or paste custom notes."
+                  aria-label="Enlarge screenshot: Web Article Selection and Paste Drawer"
+                >
+                  <img
+                    src="./screenshots/text-extractor-from-page-or-copy-paste.png"
+                    alt="LectureLens AI Paste and Selected Text drawer with Grab Page Selection button"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/text-extractor-from-page-or-copy-paste.png</code>
+                  <span>Add screenshot of web selection &amp; paste drawer</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Web Selection &amp; Custom Text</h4>
+                <p>
+                  Grab highlighted excerpts from any article or paste study text
+                  with zero irrelevant video timestamps.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Live Hybrid Telemetry (67% Local)"
+                  data-shot-desc="Tracks real Firebase AI Logic inferenceSource and latency per call: local Gemini Nano for Notes &amp; Flashcards, Cloud Gemini 3.8 Flash for Quiz."
+                  aria-label="Enlarge screenshot: Live Hybrid Telemetry"
+                >
+                  <img
+                    src="./screenshots/telemetry.png"
+                    alt="LectureLens AI Hybrid Telemetry popover showing 67 percent local execution across Gemini Nano and Cloud Gemini"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/telemetry.png</code>
+                  <span>Add screenshot of Hybrid Telemetry popover</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Live Hybrid Telemetry (67% Local)</h4>
+                <p>
+                  Transparent per-call breakdown of on-device Gemini Nano vs.
+                  Cloud Gemini latencies from Firebase AI Logic.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <h3 class="gallery-subheading">
+            <span>Core Study Workspace &amp; Local History</span>
+          </h3>
+          <div class="grid-2">
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Timestamped Notes, Glossary &amp; Personal Notes"
+                  data-shot-desc="Section summary, clickable timestamp takeaways, definitions with Explain Simply (Nano), Personal Notes with Use Video Time, and Markdown export."
+                  aria-label="Enlarge screenshot: Timestamped Notes, Glossary and Personal Notes"
+                >
+                  <img
+                    src="./screenshots/extracted-notes.png"
+                    alt="LectureLens AI Notes tab with Section Summary, Key Takeaways, Key Definitions, Personal Notes, and Export bar"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/extracted-notes.png</code>
+                  <span>Add screenshot of extracted Notes tab</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Timestamped Notes &amp; Personal Notes</h4>
+                <p>
+                  Summary, clickable takeaways, definitions with
+                  <em>Explain Simply (Nano)</em>, and user-authored notes.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Keyboard-Accessible 3D Flashcards"
+                  data-shot-desc="Interactive active-recall deck generated on-device with mastery tracking and Space / arrow / M keyboard shortcuts."
+                  aria-label="Enlarge screenshot: Keyboard-Accessible 3D Flashcards"
+                >
+                  <img
+                    src="./screenshots/flesh-cards.png"
+                    alt="LectureLens AI 3D interactive Active-Recall Flashcards tab"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/flesh-cards.png</code>
+                  <span>Add screenshot of Active-Recall Flashcards</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>3D Active-Recall Flashcards</h4>
+                <p>
+                  Interactive flip cards generated on-device with mastery
+                  progress and keyboard shortcuts (<code>Space</code>, arrows,
+                  <code>M</code>).
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Full-Lecture Cloud Quiz + Explain Simply (Nano)"
+                  data-shot-desc="Cloud Gemini 3.8 Flash practice quiz with clickable timestamp links, clear correctness feedback, explanations, and on-device Nano analogies."
+                  aria-label="Enlarge screenshot: Full-Lecture Cloud Quiz plus Explain Simply Nano"
+                >
+                  <img
+                    src="./screenshots/quiz.png"
+                    alt="LectureLens AI Quiz tab with answered questions, explanations, and Explain Simply Nano buttons"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/quiz.png</code>
+                  <span>Add screenshot of Practice Quiz tab</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Cloud Quiz &amp; Explain Simply (Nano)</h4>
+                <p>
+                  Scored multiple-choice assessment powered by Cloud Gemini with
+                  one-click on-device Nano analogies per question.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <button
+                  type="button"
+                  class="shot-trigger"
+                  data-shot-title="Private Per-Profile Local Study History"
+                  data-shot-desc="All parsed lectures, flashcards, quizzes, and personal notes stay stored locally in chrome.storage.local with source links and quota meter."
+                  aria-label="Enlarge screenshot: Private Per-Profile Local Study History"
+                >
+                  <img
+                    src="./screenshots/history.png"
+                    alt="LectureLens AI Study History drawer saved locally in Chrome profile"
+                  />
+                  <span class="shot-zoom-hint">Click to enlarge</span>
+                </button>
+                <div class="shot-fallback">
+                  <code>docs/screenshots/history.png</code>
+                  <span>Add screenshot of Study History drawer</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h4>Private Local Study History</h4>
+                <p>
+                  Offline-capable Chrome profile storage showing clickable source
+                  URLs, study stats, and exact profile quota usage.
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick Start Install Guide -->
+      <section id="install" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Try It in Chrome</p>
+            <h2>3-Step Quick Start (Install in Chrome)</h2>
+            <p>
+              Requires desktop Chrome 138+ (with Built-in Prompt API flags
+              enabled for local Gemini Nano) and a Firebase AI Logic project for
+              Cloud Quiz &amp; fallback.
+            </p>
+          </div>
+
+          <div class="install-steps">
+            <article class="step-card">
+              <span class="step-num">1</span>
+              <div class="step-content">
+                <h3>Enable Chrome Gemini Nano Flags</h3>
+                <p>
+                  Open both Chrome flags below, set
+                  <em>Optimization Guide On Device Model</em> to
+                  <strong>Enabled BypassPerfRequirement</strong> and
+                  <em>Prompt API for Gemini Nano</em> to
+                  <strong>Enabled</strong>, then relaunch Chrome.
+                </p>
+                <div class="code-block">
+                  <pre>chrome://flags/#optimization-guide-on-device-model
+chrome://flags/#prompt-api-for-gemini-nano</pre>
+                  <button
+                    type="button"
+                    class="btn btn-sm copy-btn"
+                    data-copy="chrome://flags/#optimization-guide-on-device-model"
+                  >
+                    Copy Flag URL
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            <article class="step-card">
+              <span class="step-num">2</span>
+              <div class="step-content">
+                <h3>Clone, Configure <code>.env</code>, and Build</h3>
+                <p>
+                  Copy <code>.env.example</code> to <code>.env</code> with your
+                  Firebase Web App credentials and App Check debug setting
+                  (<code>VITE_APPCHECK_DEBUG_TOKEN=true</code>), then build the
+                  MV3 extension into <code>dist/</code>.
+                </p>
+                <div class="code-block">
+                  <pre>git clone https://github.com/vadymstroiu/LectureLens-AI.git
+cd LectureLens-AI
+cp .env.example .env
+npm install &amp;&amp; npm run build</pre>
+                  <button
+                    type="button"
+                    class="btn btn-sm copy-btn"
+                    data-copy="git clone https://github.com/vadymstroiu/LectureLens-AI.git && cd LectureLens-AI && cp .env.example .env && npm install && npm run build"
+                  >
+                    Copy Commands
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            <article class="step-card">
+              <span class="step-num">3</span>
+              <div class="step-content">
+                <h3>Load Unpacked in <code>chrome://extensions</code></h3>
+                <p>
+                  Enable <strong>Developer mode</strong> in
+                  <code>chrome://extensions</code>, click
+                  <strong>Load unpacked</strong>, select <code>dist/</code>,
+                  open any YouTube lecture, and click the
+                  <strong>LectureLens AI</strong> toolbar icon.
+                </p>
+                <div class="code-block">
+                  <pre>chrome://extensions  →  Developer mode ON  →  Load unpacked → dist/</pre>
+                  <button
+                    type="button"
+                    class="btn btn-sm copy-btn"
+                    data-copy="chrome://extensions"
+                  >
+                    Copy URL
+                  </button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <div>
+          <strong>LectureLens AI</strong> — Built with Google Antigravity,
+          Firebase AI Logic Hybrid Inference &amp; App Check • Apache License
+          2.0
+        </div>
+        <div class="footer-links">
+          <a
+            href="https://github.com/vadymstroiu/LectureLens-AI"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub Repository
+          </a>
+          <a
+            href="https://github.com/vadymstroiu/LectureLens-AI/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Apache 2.0 License
+          </a>
+          <a
+            href="https://firebasehybridaihackathon.devpost.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            #BuildHybridAI 2026
+          </a>
+        </div>
+      </div>
+    </footer>
+
+    <div
+      id="shot-lightbox"
+      class="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lightbox-title"
+      hidden
+    >
+      <div class="lightbox-dialog">
+        <div class="lightbox-top">
+          <div>
+            <h3 id="lightbox-title">Screenshot</h3>
+            <p id="lightbox-desc"></p>
+          </div>
+          <button
+            id="lightbox-close"
+            type="button"
+            class="btn btn-sm"
+            aria-label="Close screenshot preview"
+          >
+            Close
+          </button>
+        </div>
+        <div class="lightbox-stage">
+          <img id="lightbox-img" alt="" />
+        </div>
+        <div class="lightbox-bar">
+          <span id="lightbox-counter">1 / 1</span>
+          <div class="lightbox-nav">
+            <button id="lightbox-prev" type="button" class="btn btn-sm">
+              ← Previous
+            </button>
+            <button id="lightbox-next" type="button" class="btn btn-sm">
+              Next →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
