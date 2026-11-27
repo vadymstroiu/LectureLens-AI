@@ -97,7 +97,7 @@ function hashText(input: string): string {
  * Root Chrome Side Panel orchestrator for LectureLens AI.
  */
 export default function App() {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [policy, setPolicy] = useState<HybridRoutingPolicy>('hybrid');
   const [autoGenerateOnCapture, setAutoGenerateOnCapture] = useState(true);
   const [onDeviceStatus, setOnDeviceStatus] =

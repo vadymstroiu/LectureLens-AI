@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LectureLens AI — Hybrid On-Device &amp; Cloud Study Companion</title>
+    <meta
+      name="description"
+      content="Chrome MV3 Side Panel extension turning YouTube lectures and web articles into timestamped notes, flashcards, personal notes, and quizzes using Gemini Nano &amp; Cloud Gemini 3.8 Flash via Firebase AI Logic."
+    />
+    <meta
+      property="og:title"
+      content="LectureLens AI — #BuildHybridAI 2026"
+    />
+    <meta
+      property="og:description"
+      content="Hybrid On-Device Gemini Nano + Cloud Gemini 3.8 Flash study companion built with Firebase AI Logic and App Check."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="./logo.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="container nav-row">
+        <a class="brand" href="#top">
+          <img src="./logo.svg" alt="" width="34" height="34" />
+          <span>LectureLens AI</span>
+        </a>
+
+        <nav aria-label="Primary navigation">
+          <ul class="nav-links">
+            <li><a href="#architecture">Hybrid AI</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#demo">Demo &amp; Gallery</a></li>
+            <li><a href="#install">Install in Chrome</a></li>
+          </ul>
+        </nav>
+
+        <div class="nav-actions">
+          <button
+            id="theme-toggle"
+            type="button"
+            class="btn btn-sm icon-btn"
+            aria-label="Toggle light or dark theme"
+            title="Toggle light/dark theme"
+          >
+            🌙
+          </button>
+          <a
+            class="btn btn-sm"
+            href="https://github.com/vadymstroiu/LectureLens-AI"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <!-- Hero -->
+      <section id="top" class="hero">
+        <div class="container hero-grid">
+          <div>
+            <span class="badge">
+              #BuildHybridAI 2026 • Chrome MV3 Extension
+            </span>
+            <h1>
+              Turn long lectures into
+              <span class="gradient-text">local-first study kits</span>
+              in one click.
+            </h1>
+            <p class="hero-lead">
+              <strong>LectureLens AI</strong> lives in Chrome’s Side Panel,
+              combining <strong>on-device Gemini Nano</strong> and
+              <strong>Cloud Gemini 3.8 Flash</strong> via
+              <strong>Firebase AI Logic Hybrid Inference</strong> to turn YouTube
+              videos and highlighted web articles into timestamped notes,
+              active-recall flashcards, personal notes, and full-lecture quizzes.
+            </p>
+            <div class="hero-cta">
+              <a class="btn btn-primary" href="#demo">Watch Demo &amp; Tour</a>
+              <a class="btn" href="#install">Install in Chrome</a>
+              <a
+                class="btn"
+                href="https://github.com/vadymstroiu/LectureLens-AI"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Source Code (Apache 2.0)
+              </a>
+            </div>
+          </div>
+
+          <aside
+            class="telemetry-panel"
+            aria-label="Example Firebase AI Logic hybrid telemetry"
+          >
+            <div class="telemetry-header">
+              <span>Live Hybrid Telemetry</span>
+              <span class="badge badge-local">67% On-Device</span>
+            </div>
+            <div class="telemetry-stats">
+              <div class="stat-box">
+                <div class="stat-value" style="color: var(--emerald)">
+                  Local: 2
+                </div>
+                <div class="stat-label">Gemini Nano (avg 22.7s)</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-value" style="color: var(--sky)">
+                  Cloud: 1
+                </div>
+                <div class="stat-label">Gemini 3.8 Flash (4.4s)</div>
+              </div>
+            </div>
+            <ul class="call-list">
+              <li class="call-item">
+                <span>⚡ Study Notes &amp; Glossary</span>
+                <span>Nano • PREFER_ON_DEVICE</span>
+              </li>
+              <li class="call-item">
+                <span>⚡ Active-Recall Flashcards</span>
+                <span>Nano • PREFER_ON_DEVICE</span>
+              </li>
+              <li class="call-item">
+                <span>☁️ Full-Lecture Quiz (12 Qs)</span>
+                <span>Cloud • ONLY_IN_CLOUD</span>
+              </li>
+              <li class="call-item">
+                <span>⚡ Explain Simply Tutor Loop</span>
+                <span>Nano • On-Device</span>
+              </li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Hybrid Architecture -->
+      <section id="architecture" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Firebase AI Logic Architecture</p>
+            <h2>Workload-matched Hybrid Inference across all 3 modes</h2>
+            <p>
+              Instead of firing 10+ cloud requests per hour-long lecture,
+              LectureLens AI matches each task to the right engine using
+              <code>firebase/ai</code> and <code>firebase/app-check</code>.
+            </p>
+          </div>
+
+          <div class="grid-3">
+            <article class="card">
+              <div>
+                <span class="badge badge-local">PREFER_ON_DEVICE</span>
+              </div>
+              <h3>Notes, Flashcards &amp; Analogies</h3>
+              <p>
+                Runs privately on <strong>Chrome Gemini Nano</strong> across up
+                to 12 lecture chapters with grammar-constrained JSON schemas (
+                <code>minItems</code> / <code>maxItems</code>).
+              </p>
+              <ul>
+                <li>Zero rate-limit quota burn</li>
+                <li>
+                  Automatic single-call Cloud fallback if Nano isn’t ready yet
+                </li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div>
+                <span class="badge badge-cloud">ONLY_IN_CLOUD</span>
+              </div>
+              <h3>Full-Lecture Practice Quiz</h3>
+              <p>
+                Sends up to 60,000 characters in one sequential call to
+                <strong>Gemini 3.8 Flash</strong> protected by MV3-safe
+                <strong>Firebase App Check</strong>.
+              </p>
+              <ul>
+                <li>Cross-chapter 5–12 question comprehension tests</li>
+                <li>Prevents duplicate questions &amp; cloud request bursts</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div>
+                <span class="badge badge-privacy">ONLY_ON_DEVICE</span>
+              </div>
+              <h3>Strict Local-Only Privacy Lock</h3>
+              <p>
+                Switch to <strong>Local-Only</strong> anytime to block all
+                outbound Cloud calls and keep sensitive study materials 100% on
+                your machine.
+              </p>
+              <ul>
+                <li>Works completely offline once Nano is downloaded</li>
+                <li>All Study History stays in your local Chrome profile</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="tutor-banner">
+            <div>
+              <strong>Bidirectional Cloud → On-Device Tutor Loop</strong>
+              <p>
+                Miss a question in the Cloud Quiz? Clicking
+                <em>Explain Simply (Nano)</em> routes just that concept back to
+                on-device Gemini Nano for an instant everyday analogy and key
+                takeaway.
+              </p>
+            </div>
+            <span class="badge badge-local">Cloud Quiz ↔ Local Tutor</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Key Features -->
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Built for Real Studying</p>
+            <h2>Complete workflow from capture to export</h2>
+          </div>
+
+          <div class="grid-3">
+            <article class="card">
+              <h3>One-Click Auto Study Kit</h3>
+              <p>
+                Click <strong>Capture YouTube Transcript</strong> to extract the
+                video transcript and automatically generate Notes → Flashcards →
+                Quiz, with live progress and a single Stop control.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Personal Notes &amp; Live Time</h3>
+              <p>
+                Write your own timestamped study notes with one-click
+                <strong>Use Video Time</strong> capture, edit/delete inline, and
+                keep everything stored privately per Chrome profile.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Cross-Tab Timestamp Jump</h3>
+              <p>
+                Click any <code>mm:ss</code> badge—even from History while
+                browsing another site—to seek in-place or open YouTube right at
+                that exact second (<code>&amp;t=Xs</code>).
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Web Articles &amp; Wikipedia</h3>
+              <p>
+                Highlight text on any webpage and click
+                <strong>Grab Page Selection</strong> (powered by privacy-first
+                MV3 <code>optional_host_permissions</code>) or paste notes
+                directly.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Chapter Filter &amp; Deep-Dive</h3>
+              <p>
+                Filter Notes, Flashcards, and Quizzes by chapter cleanly without
+                deleting other sections, or click
+                <strong>Deep-Dive Chapter (+More)</strong> for extra cards.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3>Complete Markdown &amp; A11y</h3>
+              <p>
+                Export everything (notes, personal notes, flashcards, analogies,
+                quiz &amp; clickable video links) as <code>.md</code>, built
+                with WCAG 2.1 AA keyboard navigation and Light/Dark themes.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Demo Video & Screenshots -->
+      <section id="demo" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Walkthrough</p>
+            <h2>Demo Video &amp; Product Screenshots</h2>
+            <p>
+              See Gemini Nano download/fallback, live hybrid generation,
+              personal notes, active-recall flashcards, and Cloud Quiz → Nano
+              tutor loops in action.
+            </p>
+          </div>
+
+          <div class="video-frame">
+            <div class="video-aspect">
+              <!-- STEP 6: Replace this placeholder div with your public YouTube embed iframe:
+              <iframe
+                src="https://www.youtube.com/embed/YOUR_YOUTUBE_VIDEO_ID"
+                title="LectureLens AI #BuildHybridAI 2026 Demo Video"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+              ></iframe>
+              -->
+              <div class="video-placeholder">
+                <span class="badge">YouTube Demo (&le; 3:00)</span>
+                <strong>Demo video embed ready for Step 6</strong>
+                <p>
+                  Once your public YouTube demo video is uploaded, replace the
+                  commented <code>&lt;iframe&gt;</code> in
+                  <code>docs/index.html</code> with your video ID.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <article class="shot-card">
+              <div class="shot-media">
+                <img
+                  src="./screenshots/1-nano-download.png"
+                  alt="LectureLens AI showing Gemini Nano download progress with automatic Cloud fallback"
+                  onerror="this.closest('.shot-card').classList.add('is-missing')"
+                />
+                <div class="shot-fallback">
+                  <code>docs/screenshots/1-nano-download.png</code>
+                  <span>Add screenshot of Nano download / Cloud fallback</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h3>1. Graceful Cloud Fallback &amp; Nano Download</h3>
+                <p>
+                  First-run users stay unblocked via automatic Gemini 3.8 Flash
+                  fallback while Gemini Nano downloads once in Chrome.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <img
+                  src="./screenshots/2-notes-personal.png"
+                  alt="LectureLens AI Notes tab with timestamped takeaways and Personal Notes"
+                  onerror="this.closest('.shot-card').classList.add('is-missing')"
+                />
+                <div class="shot-fallback">
+                  <code>docs/screenshots/2-notes-personal.png</code>
+                  <span>Add screenshot of Notes tab &amp; Personal Notes</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h3>2. Timestamped Notes &amp; Personal Notes</h3>
+                <p>
+                  Key takeaways sorted chronologically alongside user-authored
+                  notes stamped with live <em>Use Video Time</em>.
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <img
+                  src="./screenshots/3-flashcards.png"
+                  alt="LectureLens AI 3D interactive Active-Recall Flashcards tab"
+                  onerror="this.closest('.shot-card').classList.add('is-missing')"
+                />
+                <div class="shot-fallback">
+                  <code>docs/screenshots/3-flashcards.png</code>
+                  <span>Add screenshot of Active-Recall Flashcards</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h3>3. Keyboard-Accessible Active-Recall Deck</h3>
+                <p>
+                  3D flip cards generated on-device per chapter with mastery
+                  tracking and keyboard shortcuts (<code>Space</code>, arrows,
+                  <code>M</code>).
+                </p>
+              </div>
+            </article>
+
+            <article class="shot-card">
+              <div class="shot-media">
+                <img
+                  src="./screenshots/4-quiz-telemetry.png"
+                  alt="LectureLens AI Cloud Quiz with Explain Simply Nano analogy and Hybrid Telemetry"
+                  onerror="this.closest('.shot-card').classList.add('is-missing')"
+                />
+                <div class="shot-fallback">
+                  <code>docs/screenshots/4-quiz-telemetry.png</code>
+                  <span>Add screenshot of Quiz, Nano Analogy &amp; Telemetry</span>
+                </div>
+              </div>
+              <div class="shot-body">
+                <h3>4. Cloud Quiz + Local Nano Tutor &amp; Telemetry</h3>
+                <p>
+                  12-question full-lecture Cloud quiz paired with instant
+                  on-device Nano analogies and live Local/Cloud telemetry.
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Judge Install Guide -->
+      <section id="install" class="section">
+        <div class="container">
+          <div class="section-head">
+            <p class="section-eyebrow">Try It in Chrome</p>
+            <h2>3-Step Judge &amp; Developer Setup</h2>
+            <p>
+              Requires desktop Chrome 138+ (with Built-in Prompt API flags
+              enabled for local Gemini Nano) and a Firebase AI Logic project for
+              Cloud Quiz &amp; fallback.
+            </p>
+          </div>
+
+          <div class="install-steps">
+            <article class="step-card">
+              <span class="step-num">1</span>
+              <div class="step-content">
+                <h3>Enable Chrome Gemini Nano Flags</h3>
+                <p>
+                  Open both Chrome flags below, set
+                  <em>Optimization Guide On Device Model</em> to
+                  <strong>Enabled BypassPerfRequirement</strong> and
+                  <em>Prompt API for Gemini Nano</em> to
+                  <strong>Enabled</strong>, then relaunch Chrome.
+                </p>
+                <div class="code-block">
+                  <pre>chrome://flags/#optimization-guide-on-device-model
+chrome://flags/#prompt-api-for-gemini-nano</pre>
+                  <button
+                    type="button"
+                    class="btn btn-sm copy-btn"
+                    data-copy="chrome://flags/#optimization-guide-on-device-model"
+                  >
+                    Copy Flag URL
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            <article class="step-card">
+              <span class="step-num">2</span>
+              <div class="step-content">
+                <h3>Clone, Configure <code>.env</code>, and Build</h3>
+                <p>
+                  Copy <code>.env.example</code> to <code>.env</code> with your
+                  Firebase Web App credentials and App Check debug setting
+                  (<code>VITE_APPCHECK_DEBUG_TOKEN=true</code>), then build the
+                  MV3 extension into <code>dist/</code>.
+                </p>
+                <div class="code-block">
+                  <pre>git clone https://github.com/vadymstroiu/LectureLens-AI.git
+cd LectureLens-AI
+cp .env.example .env
+npm install &amp;&amp; npm run build</pre>
+                  <button
+                    type="button"
+                    class="btn btn-sm copy-btn"
+                    data-copy="git clone https://github.com/vadymstroiu/LectureLens-AI.git && cd LectureLens-AI && cp .env.example .env && npm install && npm run build"
+                  >
+                    Copy Commands
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            <article class="step-card">
+              <span class="step-num">3</span>
+              <div class="step-content">
+                <h3>Load Unpacked in <code>chrome://extensions</code></h3>
+                <p>
+                  Enable <strong>Developer mode</strong> in
+                  <code>chrome://extensions</code>, click
+                  <strong>Load unpacked</strong>, select <code>dist/</code>,
+                  open any YouTube lecture, and click the
+                  <strong>LectureLens AI</strong> toolbar icon.
+                </p>
+                <div class="code-block">
+                  <pre>chrome://extensions  →  Developer mode ON  →  Load unpacked → dist/</pre>
+                  <button
+                    type="button"
+                    class="btn btn-sm copy-btn"
+                    data-copy="chrome://extensions"
+                  >
+                    Copy URL
+                  </button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <div>
+          <strong>LectureLens AI</strong> — Built with Google Antigravity,
+          Firebase AI Logic Hybrid Inference &amp; App Check • Apache License
+          2.0
+        </div>
+        <div class="footer-links">
+          <a
+            href="https://github.com/vadymstroiu/LectureLens-AI"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub Repository
+          </a>
+          <a
+            href="https://github.com/vadymstroiu/LectureLens-AI/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Apache 2.0 License
+          </a>
+          <a
+            href="https://firebasehybridaihackathon.devpost.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            #BuildHybridAI 2026
+          </a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        const root = document.documentElement;
+        const toggle = document.getElementById('theme-toggle');
+        const saved = localStorage.getItem('lecturelens-docs-theme');
+        root.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
+
+        const syncIcon = () => {
+          const isDark = root.getAttribute('data-theme') === 'dark';
+          if (toggle) toggle.textContent = isDark ? '☀' : '🌙';
+        };
+        syncIcon();
+        toggle?.addEventListener('click', () => {
+          const next =
+            root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+          root.setAttribute('data-theme', next);
+          localStorage.setItem('lecturelens-docs-theme', next);
+          syncIcon();
+        });
+
+        document.querySelectorAll('.copy-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const text = btn.getAttribute('data-copy');
+            if (!text || !navigator.clipboard) return;
+            try {
+              await navigator.clipboard.writeText(text);
+              const original = btn.textContent;
+              btn.textContent = 'Copied!';
+              setTimeout(() => {
+                btn.textContent = original;
+              }, 1500);
+            } catch {
+              // Ignore clipboard permission errors on file://
+            }
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
